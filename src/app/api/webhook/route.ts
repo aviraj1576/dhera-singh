@@ -10,8 +10,8 @@ import { runJewelleryAgent } from "@/lib/anthropic";
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const mode      = searchParams.get("hub.mode");
-  const token     = searchParams.get("hub.verify_token");
+  const mode = searchParams.get("hub.mode");
+  const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
   const igToken = process.env.INSTAGRAM_VERIFY_TOKEN;
@@ -38,14 +38,15 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    // If body can't be parsed, still return 200 to stop retries
     return NextResponse.json({ status: "ok" });
   }
 
-  // Process asynchronously so we can return 200 immediately
-  processEvent(body).catch((err) => {
+  // ✅ FIXED — await BEFORE returning so Vercel doesn't kill the process
+  try {
+    await processEvent(body);
+  } catch (err) {
     console.error("Background event processing error:", err);
-  });
+  }
 
   return NextResponse.json({ status: "ok" });
 }
@@ -77,24 +78,24 @@ async function handleInstagramEvent(body: Record<string, unknown>) {
       const message = msgEvent.message as Record<string, unknown> | undefined;
       if (!message || (message.is_echo as boolean)) continue; // skip echoes
 
-      const senderId   = (msgEvent.sender  as { id: string }).id;
-      const messageText = (message.text  as string | undefined) ?? "";
+      const senderId = (msgEvent.sender as { id: string }).id;
+      const messageText = (message.text as string | undefined) ?? "";
       if (!messageText.trim()) continue;
 
       console.log(`📨 Instagram DM from ${senderId}: ${messageText}`);
 
       const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
         userMessage: messageText,
-        senderName:  senderId,
-        platform:    "instagram_dm",
+        senderName: senderId,
+        platform: "instagram_dm",
       });
 
       await supabaseAdmin.from("conversations").insert({
-        platform:            "instagram_dm",
-        sender_id:           senderId,
-        human_message:       messageText,
-        ai_response:         reply,
-        status:              needsHuman ? "human_needed" : "ai_answered",
+        platform: "instagram_dm",
+        sender_id: senderId,
+        human_message: messageText,
+        ai_response: reply,
+        status: needsHuman ? "human_needed" : "ai_answered",
         response_latency_ms: latencyMs,
       });
 
@@ -108,11 +109,11 @@ async function handleInstagramEvent(body: Record<string, unknown>) {
     for (const change of changes) {
       if ((change.field as string) !== "comments") continue;
 
-      const value      = change.value as Record<string, unknown>;
-      const commentText = (value.text  as string | undefined) ?? "";
-      const commentId   = (value.id    as string | undefined);
-      const senderId    = (value.from  as { id?: string } | undefined)?.id;
-      const media       = value.media as { id?: string } | undefined;
+      const value = change.value as Record<string, unknown>;
+      const commentText = (value.text as string | undefined) ?? "";
+      const commentId = (value.id as string | undefined);
+      const senderId = (value.from as { id?: string } | undefined)?.id;
+      const media = value.media as { id?: string } | undefined;
 
       if (!commentText.trim() || !commentId) continue;
 
@@ -139,10 +140,10 @@ async function handleInstagramEvent(body: Record<string, unknown>) {
 
       // Step 2: Run AI to generate a private DM answer
       const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
-        userMessage:       commentText,
+        userMessage: commentText,
         instagramPostLink: postLink,
-        senderName:        senderId,
-        platform:          "instagram_comment",
+        senderName: senderId,
+        platform: "instagram_comment",
       });
 
       // Step 3: Send the detailed answer as a DM
@@ -152,12 +153,12 @@ async function handleInstagramEvent(body: Record<string, unknown>) {
 
       // Step 4: Log the full interaction
       await supabaseAdmin.from("conversations").insert({
-        platform:            "instagram_comment",
-        sender_id:           senderId ?? "unknown",
+        platform: "instagram_comment",
+        sender_id: senderId ?? "unknown",
         instagram_post_link: postLink ?? null,
-        human_message:       commentText,
-        ai_response:         reply,
-        status:              needsHuman ? "human_needed" : "ai_answered",
+        human_message: commentText,
+        ai_response: reply,
+        status: needsHuman ? "human_needed" : "ai_answered",
         response_latency_ms: latencyMs,
       });
     }
@@ -175,13 +176,13 @@ async function handleWhatsAppEvent(body: Record<string, unknown>) {
     for (const change of changes) {
       if ((change.field as string) !== "messages") continue;
 
-      const value    = change.value as Record<string, unknown>;
+      const value = change.value as Record<string, unknown>;
       const messages = (value.messages as Record<string, unknown>[]) ?? [];
 
       for (const msg of messages) {
         if ((msg.type as string) !== "text") continue;
 
-        const senderId    = (msg.from as string);
+        const senderId = (msg.from as string);
         const messageText = ((msg.text as { body?: string } | undefined)?.body) ?? "";
         if (!messageText.trim()) continue;
 
@@ -189,16 +190,16 @@ async function handleWhatsAppEvent(body: Record<string, unknown>) {
 
         const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
           userMessage: messageText,
-          senderName:  senderId,
-          platform:    "whatsapp",
+          senderName: senderId,
+          platform: "whatsapp",
         });
 
         await supabaseAdmin.from("conversations").insert({
-          platform:            "whatsapp",
-          sender_id:           senderId,
-          human_message:       messageText,
-          ai_response:         reply,
-          status:              needsHuman ? "human_needed" : "ai_answered",
+          platform: "whatsapp",
+          sender_id: senderId,
+          human_message: messageText,
+          ai_response: reply,
+          status: needsHuman ? "human_needed" : "ai_answered",
           response_latency_ms: latencyMs,
         });
 
@@ -216,11 +217,11 @@ async function handleWhatsAppEvent(body: Record<string, unknown>) {
 async function sendInstagramDM(recipientId: string, message: string) {
   const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`;
   const res = await fetch(url, {
-    method:  "POST",
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({
-      recipient:      { id: recipientId },
-      message:        { text: message },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { text: message },
       messaging_type: "RESPONSE",
     }),
   });
@@ -236,9 +237,9 @@ async function sendInstagramDM(recipientId: string, message: string) {
 async function replyToInstagramComment(commentId: string, message: string) {
   const url = `https://graph.facebook.com/v19.0/${commentId}/replies?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`;
   const res = await fetch(url, {
-    method:  "POST",
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ message }),
+    body: JSON.stringify({ message }),
   });
 
   if (!res.ok) {
@@ -252,10 +253,10 @@ async function replyToInstagramComment(commentId: string, message: string) {
 async function sendWhatsAppMessage(to: string, message: string) {
   const url = `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
   const res = await fetch(url, {
-    method:  "POST",
+    method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization:  `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
