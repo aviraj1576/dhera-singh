@@ -1,174 +1,188 @@
 // src/app/api/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { runJewelleryAgent } from "@/lib/anthropic";
+import { runJewelleryAgent, extractLinkFromMessage } from "@/lib/anthropic";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET: Webhook verification
-// Meta calls this once when you register the webhook URL.
-// It checks that your verify token matches what you set in the Meta dashboard.
-// ─────────────────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  const igToken = process.env.INSTAGRAM_VERIFY_TOKEN;
-  const waToken = process.env.WHATSAPP_VERIFY_TOKEN;
-
-  if (mode === "subscribe" && (token === igToken || token === waToken)) {
-    console.log("✅ Webhook verified by Meta");
+  if (
+    mode === "subscribe" &&
+    (token === process.env.INSTAGRAM_VERIFY_TOKEN ||
+      token === process.env.WHATSAPP_VERIFY_TOKEN)
+  ) {
+    console.log("✅ Webhook verified");
     return new NextResponse(challenge, { status: 200 });
   }
-
-  console.error("❌ Webhook verification failed — token mismatch");
-  return NextResponse.json({ error: "Verification failed" }, { status: 403 });
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST: Receive events
-// Meta sends all messages, comments, DMs here in real time.
-// IMPORTANT: Always return HTTP 200 quickly. If you take >5s or return an error,
-// Meta will retry the event repeatedly, causing duplicate processing.
-// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   let body: Record<string, unknown>;
-
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ status: "ok" });
   }
 
-  // ✅ FIXED — await BEFORE returning so Vercel doesn't kill the process
   try {
     await processEvent(body);
   } catch (err) {
-    console.error("Background event processing error:", err);
+    console.error("Webhook error:", err);
   }
 
   return NextResponse.json({ status: "ok" });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event router
-// ─────────────────────────────────────────────────────────────────────────────
 async function processEvent(body: Record<string, unknown>) {
   if (body.object === "instagram") {
-    await handleInstagramEvent(body);
+    await handleInstagram(body);
   } else if (body.object === "whatsapp_business_account") {
-    await handleWhatsAppEvent(body);
-  } else {
-    console.log("Unknown event object:", body.object);
+    await handleWhatsApp(body);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Instagram handler
-// Handles: DMs (messaging) and Comments (changes)
+// INSTAGRAM
 // ─────────────────────────────────────────────────────────────────────────────
-async function handleInstagramEvent(body: Record<string, unknown>) {
+async function handleInstagram(body: Record<string, unknown>) {
   const entries = (body.entry as Record<string, unknown>[]) ?? [];
 
   for (const entry of entries) {
-    // ── Direct Messages ──────────────────────────────────────────────────────
+
+    // ── DMs ──────────────────────────────────────────────────────────────────
     const messaging = (entry.messaging as Record<string, unknown>[]) ?? [];
-    for (const msgEvent of messaging) {
-      const message = msgEvent.message as Record<string, unknown> | undefined;
-      if (!message || (message.is_echo as boolean)) continue; // skip echoes
+    for (const event of messaging) {
+      const msg = event.message as Record<string, unknown> | undefined;
+      if (!msg || (msg.is_echo as boolean)) continue;
 
-      const senderId = (msgEvent.sender as { id: string }).id;
-      const messageText = (message.text as string | undefined) ?? "";
-      if (!messageText.trim()) continue;
+      const senderId = (event.sender as { id: string }).id;
 
-      console.log(`📨 Instagram DM from ${senderId}: ${messageText}`);
+      // Detect if it's an image/screenshot
+      const hasImage = !!(msg.attachments as unknown[])?.length &&
+        (msg.attachments as { type: string }[])?.[0]?.type === "image";
 
-      const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
-        userMessage: messageText,
+      // Detect if a reel/share was sent
+      const attachments = (msg.attachments as Record<string, unknown>[] | undefined) ?? [];
+      let attachedLink: string | undefined;
+      for (const att of attachments) {
+        const payload = att.payload as Record<string, unknown> | undefined;
+        if (payload?.url) attachedLink = payload.url as string;
+        if (payload?.link) attachedLink = payload.link as string;
+      }
+
+      const messageText = (msg.text as string | undefined) ?? "";
+
+      // Extract any link the user typed in the message text
+      const textLink = extractLinkFromMessage(messageText);
+      const resolvedLink = attachedLink || textLink;
+
+      console.log(`📨 DM from ${senderId}: "${messageText}" | link: ${resolvedLink ?? "none"} | image: ${hasImage}`);
+
+      const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
+        userMessage: messageText || (hasImage ? "screenshot" : ""),
+        instagramPostLink: resolvedLink,
         senderName: senderId,
         platform: "instagram_dm",
+        messageType: hasImage ? "image" : attachedLink ? "reel" : "text",
+        attachedLink: resolvedLink,
       });
 
-      await supabaseAdmin.from("conversations").insert({
-        platform: "instagram_dm",
-        sender_id: senderId,
-        human_message: messageText,
-        ai_response: reply,
-        status: needsHuman ? "human_needed" : "ai_answered",
-        response_latency_ms: latencyMs,
-      });
+      // Save conversation
+      try {
+        await supabaseAdmin.from("conversations").insert({
+          platform: "instagram_dm",
+          sender_id: senderId,
+          instagram_post_link: resolvedLink ?? null,
+          human_message: messageText,
+          ai_response: reply,
+          status: needsHuman ? "human_needed" : "ai_answered",
+          response_latency_ms: latencyMs,
+        });
+      } catch (e) {
+        console.error("DB insert failed:", e);
+      }
 
+      // Send reply then follow-up
       if (!needsHuman) {
-        await sendInstagramDM(senderId, reply);
+        await sendIGDM(senderId, reply);
+        if (followUp) {
+          // Small delay so messages arrive in order
+          await sleep(1500);
+          await sendIGDM(senderId, followUp);
+        }
       }
     }
 
-    // ── Comments ─────────────────────────────────────────────────────────────
+    // ── COMMENTS ─────────────────────────────────────────────────────────────
     const changes = (entry.changes as Record<string, unknown>[]) ?? [];
     for (const change of changes) {
       if ((change.field as string) !== "comments") continue;
 
       const value = change.value as Record<string, unknown>;
       const commentText = (value.text as string | undefined) ?? "";
-      const commentId = (value.id as string | undefined);
+      const commentId = value.id as string | undefined;
       const senderId = (value.from as { id?: string } | undefined)?.id;
-      const media = value.media as { id?: string } | undefined;
+      const media = value.media as { id?: string; link?: string } | undefined;
 
-      if (!commentText.trim() || !commentId) continue;
+      if (!commentText.trim() || !commentId || !senderId) continue;
 
-      // Only respond to comments that appear to be questions or price inquiries
-      const isQuestion =
-        commentText.includes("?") ||
-        /price|rate|weight|kitna|kya|kimat|rupees|how much|bhaav|daam|sona|chandi|gold|silver/i.test(
-          commentText
-        );
+      // Build the post link from media id
+      const postLink = media?.link ||
+        (media?.id ? `https://www.instagram.com/p/${media.id}/` : undefined);
 
-      if (!isQuestion) continue;
+      console.log(`💬 Comment from ${senderId}: "${commentText}" | post: ${postLink}`);
 
-      const postLink = media?.id
-        ? `https://www.instagram.com/p/${media.id}/`
-        : undefined;
-
-      console.log(`💬 Instagram Comment from ${senderId}: ${commentText}`);
-
-      // Step 1: Reply publicly on the comment — redirect to DM
-      await replyToInstagramComment(
+      // ── Public reply: greeting + check DM only ────────────────────────────
+      await replyToComment(
         commentId,
-        "Sat Shri Akal Ji 🙏 Please check your DM for the details on this piece!"
+        "Sat Shri Akal Ji 🙏 Please check your DM for the details!"
       );
 
-      // Step 2: Run AI to generate a private DM answer
-      const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
+      // ── Look up product from the post link ────────────────────────────────
+      const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
         userMessage: commentText,
         instagramPostLink: postLink,
         senderName: senderId,
         platform: "instagram_comment",
+        attachedLink: postLink,
       });
 
-      // Step 3: Send the detailed answer as a DM
-      if (senderId && !needsHuman) {
-        await sendInstagramDM(senderId, reply);
+      // ── Save conversation ─────────────────────────────────────────────────
+      try {
+        await supabaseAdmin.from("conversations").insert({
+          platform: "instagram_comment",
+          sender_id: senderId,
+          instagram_post_link: postLink ?? null,
+          human_message: commentText,
+          ai_response: reply,
+          status: needsHuman ? "human_needed" : "ai_answered",
+          response_latency_ms: latencyMs,
+        });
+      } catch (e) {
+        console.error("DB insert failed:", e);
       }
 
-      // Step 4: Log the full interaction
-      await supabaseAdmin.from("conversations").insert({
-        platform: "instagram_comment",
-        sender_id: senderId ?? "unknown",
-        instagram_post_link: postLink ?? null,
-        human_message: commentText,
-        ai_response: reply,
-        status: needsHuman ? "human_needed" : "ai_answered",
-        response_latency_ms: latencyMs,
-      });
+      // ── DM the user with price + follow-up ────────────────────────────────
+      if (!needsHuman) {
+        await sendIGDM(senderId, reply);
+        if (followUp) {
+          await sleep(1500);
+          await sendIGDM(senderId, followUp);
+        }
+      }
     }
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WhatsApp handler
+// WHATSAPP
 // ─────────────────────────────────────────────────────────────────────────────
-async function handleWhatsAppEvent(body: Record<string, unknown>) {
+async function handleWhatsApp(body: Record<string, unknown>) {
   const entries = (body.entry as Record<string, unknown>[]) ?? [];
 
   for (const entry of entries) {
@@ -180,31 +194,51 @@ async function handleWhatsAppEvent(body: Record<string, unknown>) {
       const messages = (value.messages as Record<string, unknown>[]) ?? [];
 
       for (const msg of messages) {
-        if ((msg.type as string) !== "text") continue;
+        const senderId = msg.from as string;
+        const msgType = msg.type as string;
 
-        const senderId = (msg.from as string);
-        const messageText = ((msg.text as { body?: string } | undefined)?.body) ?? "";
-        if (!messageText.trim()) continue;
+        // Extract text — works for text and caption on image
+        const messageText =
+          (msg.text as { body?: string } | undefined)?.body ||
+          (msg.image as { caption?: string } | undefined)?.caption ||
+          "";
 
-        console.log(`📱 WhatsApp from ${senderId}: ${messageText}`);
+        const isImage = msgType === "image";
 
-        const { reply, needsHuman, latencyMs } = await runJewelleryAgent({
-          userMessage: messageText,
+        // Extract any shared link from text
+        const resolvedLink = extractLinkFromMessage(messageText);
+
+        console.log(`📱 WhatsApp from ${senderId}: "${messageText}" | type: ${msgType}`);
+
+        const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
+          userMessage: messageText || (isImage ? "screenshot" : ""),
+          instagramPostLink: resolvedLink,
           senderName: senderId,
           platform: "whatsapp",
+          messageType: isImage ? "image" : "text",
+          attachedLink: resolvedLink,
         });
 
-        await supabaseAdmin.from("conversations").insert({
-          platform: "whatsapp",
-          sender_id: senderId,
-          human_message: messageText,
-          ai_response: reply,
-          status: needsHuman ? "human_needed" : "ai_answered",
-          response_latency_ms: latencyMs,
-        });
+        try {
+          await supabaseAdmin.from("conversations").insert({
+            platform: "whatsapp",
+            sender_id: senderId,
+            instagram_post_link: resolvedLink ?? null,
+            human_message: messageText,
+            ai_response: reply,
+            status: needsHuman ? "human_needed" : "ai_answered",
+            response_latency_ms: latencyMs,
+          });
+        } catch (e) {
+          console.error("DB insert failed:", e);
+        }
 
         if (!needsHuman) {
-          await sendWhatsAppMessage(senderId, reply);
+          await sendWA(senderId, reply);
+          if (followUp) {
+            await sleep(1500);
+            await sendWA(senderId, followUp);
+          }
         }
       }
     }
@@ -212,64 +246,65 @@ async function handleWhatsAppEvent(body: Record<string, unknown>) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Send helpers
+// SEND HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-async function sendInstagramDM(recipientId: string, message: string) {
-  const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      recipient: { id: recipientId },
-      message: { text: message },
-      messaging_type: "RESPONSE",
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("❌ Instagram DM failed:", err);
-  } else {
-    console.log(`✅ Instagram DM sent to ${recipientId}`);
+async function sendIGDM(recipientId: string, message: string) {
+  if (!process.env.INSTAGRAM_ACCESS_TOKEN) {
+    console.log("⚠️ No INSTAGRAM_ACCESS_TOKEN");
+    return;
   }
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        message: { text: message },
+        messaging_type: "RESPONSE",
+      }),
+    }
+  );
+  if (!res.ok) console.error("❌ IG DM failed:", await res.text());
+  else console.log("✅ IG DM sent to", recipientId);
 }
 
-async function replyToInstagramComment(commentId: string, message: string) {
-  const url = `https://graph.facebook.com/v19.0/${commentId}/replies?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("❌ Instagram comment reply failed:", err);
-  } else {
-    console.log(`✅ Comment reply posted on ${commentId}`);
-  }
+async function replyToComment(commentId: string, message: string) {
+  if (!process.env.INSTAGRAM_ACCESS_TOKEN) return;
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/${commentId}/replies?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }
+  );
+  if (!res.ok) console.error("❌ Comment reply failed:", await res.text());
+  else console.log("✅ Comment replied");
 }
 
-async function sendWhatsAppMessage(to: string, message: string) {
-  const url = `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-    },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to,
-      type: "text",
-      text: { body: message },
-    }),
-  });
+async function sendWA(to: string, message: string) {
+  if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) return;
+  const res = await fetch(
+    `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: message },
+      }),
+    }
+  );
+  if (!res.ok) console.error("❌ WA failed:", await res.text());
+  else console.log("✅ WA sent to", to);
+}
 
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("❌ WhatsApp message failed:", err);
-  } else {
-    console.log(`✅ WhatsApp message sent to ${to}`);
-  }
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

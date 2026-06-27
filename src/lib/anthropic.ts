@@ -1,151 +1,218 @@
 // src/lib/anthropic.ts
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "./supabase";
-import { formatPrice } from "./price-calculator";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
 export interface AgentInput {
   userMessage: string;
-  instagramPostLink?: string; // the specific post/reel the customer is asking about
+  instagramPostLink?: string;
   senderName?: string;
   platform?: string;
+  messageType?: "text" | "image" | "reel" | "story_reply";
+  attachedLink?: string; // any link extracted from the message itself
 }
 
 export interface AgentOutput {
   reply: string;
+  followUp?: string; // second message asking for phone number
   needsHuman: boolean;
   latencyMs: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Agent Function
-// Called for every DM, WhatsApp message, and comment question.
-// ─────────────────────────────────────────────────────────────────────────────
-export async function runJewelleryAgent(
-  input: AgentInput
-): Promise<AgentOutput> {
+// ─── Detect intent from message ───────────────────────────────────────────────
+function detectIntent(message: string): "price" | "purity" | "weight" | "image" | "greeting" | "other" {
+  const msg = message.toLowerCase().trim();
+
+  // Screenshot / image signals
+  if (msg.includes("screenshot") || msg.includes("ss") || msg.includes("screen shot")) return "image";
+
+  // Price signals
+  if (
+    msg === "pp" || msg === "price" || msg === "p" ||
+    msg.includes("price") || msg.includes("pp") ||
+    msg.includes("kimat") || msg.includes("rate") ||
+    msg.includes("kitna") || msg.includes("how much") ||
+    msg.includes("bhaav") || msg.includes("cost") ||
+    msg.includes("daam")
+  ) return "price";
+
+  // Purity signals
+  if (
+    msg === "stuff" || msg.includes("stuff") ||
+    msg.includes("purity") || msg.includes("karat") ||
+    msg.includes("gold") || msg.includes("silver") ||
+    msg.includes("18k") || msg.includes("22k") || msg.includes("24k")
+  ) return "purity";
+
+  // Weight signals
+  if (
+    msg.includes("weight") || msg.includes("wajan") ||
+    msg.includes("gram") || msg.includes("gm")
+  ) return "weight";
+
+  // Greeting
+  if (
+    msg === "hi" || msg === "hello" || msg === "hey" ||
+    msg.includes("sat sri akal") || msg.includes("ssa") ||
+    msg.includes("namaste")
+  ) return "greeting";
+
+  return "other";
+}
+
+// ─── Extract any Instagram link from a message ────────────────────────────────
+export function extractLinkFromMessage(message: string): string | undefined {
+  const urlRegex = /(https?:\/\/(www\.)?(instagram\.com|instagr\.am)\/[^\s]+)/i;
+  const match = message.match(urlRegex);
+  return match?.[0];
+}
+
+// ─── Fetch product by instagram link ─────────────────────────────────────────
+async function getProductByLink(link: string) {
+  if (!link) return null;
+
+  // Normalise the link — remove query params and trailing slashes
+  const cleanLink = link.split("?")[0].replace(/\/$/, "");
+
+  const { data } = await supabaseAdmin
+    .from("products")
+    .select("*")
+    .or(
+      `instagram_link.eq.${link},instagram_link.eq.${cleanLink}`
+    )
+    .limit(1)
+    .single();
+
+  return data ?? null;
+}
+
+// ─── Format price display ─────────────────────────────────────────────────────
+function formatPrice(product: {
+  fixed_price: number | null;
+  calculated_price: number | null;
+}): string {
+  const price = product.fixed_price ?? product.calculated_price;
+  if (!price || price === 0) return "price on request";
+  return `₹${Number(price).toLocaleString("en-IN")}`;
+}
+
+// ─── Build product detail line ────────────────────────────────────────────────
+function buildProductLine(
+  product: Record<string, unknown>,
+  intent: "price" | "purity" | "weight"
+): string {
+  if (intent === "price") {
+    return `${product.name} — ${formatPrice(product as { fixed_price: number | null; calculated_price: number | null })}`;
+  }
+  if (intent === "purity") {
+    return `${product.name} — ${product.purity ?? "not specified"}`;
+  }
+  if (intent === "weight") {
+    return `${product.name} — ${product.weight_grams}g`;
+  }
+  return String(product.name);
+}
+
+// ─── Main agent ───────────────────────────────────────────────────────────────
+export async function runJewelleryAgent(input: AgentInput): Promise<AgentOutput> {
   const startTime = Date.now();
 
-  // ── 1. Fetch company context ──────────────────────────────────────────────
+  const intent = detectIntent(input.userMessage);
+
+  // Resolve the product link — from input or extracted from message text
+  const resolvedLink =
+    input.instagramPostLink ||
+    input.attachedLink ||
+    extractLinkFromMessage(input.userMessage);
+
+  // ── CASE 1: User sent a screenshot ───────────────────────────────────────
+  if (intent === "image" || input.messageType === "image") {
+    return {
+      reply: "Sat Shri Akal Ji 🙏 Please send us the actual reel or post link — we'll get you all the details right away!",
+      followUp: "Ji, kindly share your phone number too so our team can assist you personally 🙏",
+      needsHuman: false,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  // ── CASE 2: Greeting ─────────────────────────────────────────────────────
+  if (intent === "greeting") {
+    return {
+      reply: "Sat Shri Akal Ji 🙏 Welcome to Dhera Singh Jewellers! Please share the reel or post you're interested in and I'll get you the details.",
+      followUp: "Ji, kindly also share your phone number so our team can assist you personally 🙏",
+      needsHuman: false,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  // ── CASE 3: Price/purity/weight asked WITHOUT any product link ────────────
+  if ((intent === "price" || intent === "purity" || intent === "weight") && !resolvedLink) {
+    return {
+      reply: "Sat Shri Akal Ji 🙏 Please send us the reel or post you're referring to and I'll get you the details right away!",
+      followUp: "Ji, kindly share your phone number too so our team can personally assist you 🙏",
+      needsHuman: false,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  // ── CASE 4: Price/purity/weight WITH a product link ──────────────────────
+  if ((intent === "price" || intent === "purity" || intent === "weight") && resolvedLink) {
+    const product = await getProductByLink(resolvedLink);
+
+    if (!product) {
+      // Link found but no matching product in DB
+      return {
+        reply: "Sat Shri Akal Ji 🙏 We're adding this piece to our system — our team will DM you the details shortly!",
+        followUp: "Ji, kindly share your phone number so we can reach you personally 🙏",
+        needsHuman: true,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
+    const detail = buildProductLine(product, intent);
+
+    return {
+      reply: `Sat Shri Akal Ji 🙏\n${detail}\nFor more details, our team is here to help!`,
+      followUp: "Ji, could you share your phone number? Our team will reach out personally 🙏",
+      needsHuman: false,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  // ── CASE 5: General question — use Claude for anything else ──────────────
   const { data: companyRows } = await supabaseAdmin
     .from("company_info")
     .select("info_key, info_value");
 
   const companyContext = (companyRows ?? [])
-    .map((row) => `${row.info_key}: ${row.info_value}`)
+    .map((r) => `${r.info_key}: ${r.info_value}`)
     .join("\n");
 
-  // ── 2. Fetch current metal prices ─────────────────────────────────────────
-  const { data: metalRows } = await supabaseAdmin
-    .from("metal_prices")
-    .select("karat_label, price_per_gram");
-
-  const metalContext = (metalRows ?? [])
-    .map((row) => `${row.karat_label}: ₹${row.price_per_gram}/gram`)
-    .join("  |  ");
-
-  // ── 3. Fetch product catalogue ────────────────────────────────────────────
-  const { data: products } = await supabaseAdmin
-    .from("products")
-    .select(
-      "product_id, name, purity, weight_grams, fixed_price, calculated_price, making_charges_percent, stone_value, diamond_value, polki_value, instagram_link, description, is_available"
-    )
-    .eq("is_available", true);
-
-  // Sort: if the customer is asking about a specific post, put that product first
-  let sortedProducts = [...(products ?? [])];
-  if (input.instagramPostLink) {
-    const matchIdx = sortedProducts.findIndex(
-      (p) =>
-        p.instagram_link &&
-        p.instagram_link.trim() === input.instagramPostLink?.trim()
-    );
-    if (matchIdx > -1) {
-      const [matched] = sortedProducts.splice(matchIdx, 1);
-      sortedProducts = [matched, ...sortedProducts];
-    }
-  }
-
-  const productContext = sortedProducts
-    .map((p) => {
-      const price = formatPrice(p);
-      const parts = [
-        `Name: ${p.name}`,
-        `ID: ${p.product_id}`,
-        `Purity: ${p.purity}`,
-        `Weight: ${p.weight_grams}g`,
-        `Price: ${price}`,
-        p.instagram_link ? `Post: ${p.instagram_link}` : null,
-        p.description ? `Desc: ${p.description}` : null,
-      ].filter(Boolean);
-      return `[ ${parts.join(" | ")} ]`;
-    })
-    .join("\n");
-
-  // ── 4. Build system prompt ────────────────────────────────────────────────
-  const systemPrompt = `You are the AI customer service representative for Dhera Singh Jewellers — a premium, trusted jewellery shop in Punjab, India. You are warm, respectful, culturally aware, and knowledgeable about jewellery. You speak in a natural Punjabi-English tone, using phrases like "Sat Shri Akal Ji", "Vadhayian", or "Ji zaroor" where appropriate. Your replies are always helpful, concise (under 130 words), and never robotic.
-
-━━━ COMPANY INFORMATION ━━━
-${companyContext}
-
-━━━ CURRENT METAL RATES ━━━
-${metalContext || "Rates are being updated — please ask for the latest price directly."}
-Note: For products with a calculated price, the making charges and all stone/polki/diamond values are already included in the final price shown.
-
-━━━ LIVE PRODUCT CATALOGUE ━━━
-${productContext || "No products have been added yet."}
-
-━━━ PLATFORM ━━━
-${input.platform || "Not specified"} | Customer reference post: ${input.instagramPostLink || "None"}
-
-━━━ YOUR RULES — FOLLOW STRICTLY ━━━
-1. ONLY answer questions related to the jewellery shop: prices, weight, purity, availability, services, location, hours, bridal sets, custom orders, repair, and resizing.
-2. If a customer asks about a specific Instagram post or reel, find the matching product by its "Post" URL in the catalogue and give them the price, weight, and purity from that entry. Never say "I don't know the price" if it is in the catalogue.
-3. Always give actual ₹ prices. Never say "please call for price" unless the product genuinely has no price set (shows "Price on request").
-4. If the question is about something you genuinely cannot answer from the data above (a very specific repair job, a custom design not in catalogue, etc.), respond warmly and include the phrase "connecting you with our team" so the system knows to escalate.
-5. NEVER discuss competitors. NEVER make up prices. NEVER answer questions unrelated to jewellery or the shop. If a customer asks about something irrelevant (e.g. politics, recipes), politely redirect: "Ji, I can only help with jewellery-related questions for Dhera Singh Jewellers!"
-6. Keep replies under 130 words. Use ₹ symbol for prices. Use Indian number formatting (₹1,20,000 not ₹120000).
-7. If a message is just a greeting ("hello", "hi"), respond warmly and ask how you can help.
-
-Customer name/ID: ${input.senderName || "valued customer"}`;
-
-  // ── 5. Call Claude ────────────────────────────────────────────────────────
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 400,
-    system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: input.userMessage,
-      },
-    ],
+    max_tokens: 150,
+    system: `You are the customer service AI for Dhera Singh Jewellers, a premium jewellery shop in Punjab.
+Reply in warm Punjabi-English. MAX 2 lines. Never give long replies.
+Only answer about: prices, jewellery, shop info, services.
+If asked anything unrelated, say you can only help with jewellery queries.
+
+COMPANY INFO:
+${companyContext}`,
+    messages: [{ role: "user", content: input.userMessage }],
   });
 
-  const latencyMs = Date.now() - startTime;
-
-  // Extract text from response
   const replyText = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
     .join("");
 
-  // ── 6. Detect if human is needed ─────────────────────────────────────────
-  // The AI is instructed to include "connecting you with our team" when uncertain.
-  const needsHuman =
-    replyText.toLowerCase().includes("connecting you with our team") ||
-    replyText.toLowerCase().includes("human intervention") ||
-    replyText.length < 15; // suspiciously short = something went wrong
+  const needsHuman = replyText.toLowerCase().includes("connecting you with our team");
 
   return {
     reply: replyText,
+    followUp: "Ji, could you share your phone number? Our team will reach out personally 🙏",
     needsHuman,
-    latencyMs,
+    latencyMs: Date.now() - startTime,
   };
 }
