@@ -2,11 +2,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "./supabase";
 
-if (!process.env.ANTHROPIC_API_KEY) {
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+
+if (!isBuildPhase && !process.env.ANTHROPIC_API_KEY) {
   throw new Error("ANTHROPIC_API_KEY is not set");
 }
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || (isBuildPhase ? "placeholder-key" : ""),
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -305,12 +309,15 @@ export async function bufferAndProcess(
   processFn: (combined: string, link: string | undefined) => Promise<void>
 ): Promise<void> {
   // Store this message in the buffer
-  await supabaseAdmin.from("message_buffer").insert({
+  const { error: insertError } = await supabaseAdmin.from("message_buffer").insert({
     sender_id: senderId,
     platform,
     message,
     resolved_link: resolvedLink ?? null,
-  }).catch((e) => console.error("Buffer insert error:", e));
+  });
+  if (insertError) {
+    console.error("Buffer insert error:", insertError.message);
+  }
 
   // Wait for more messages to arrive
   await sleep(BUFFER_WAIT_MS);
@@ -345,11 +352,13 @@ export async function bufferAndProcess(
 
   // Clear all buffered messages for this sender
   const ids = buffered.map((b) => b.id);
-  await supabaseAdmin
+  const { error: deleteError } = await supabaseAdmin
     .from("message_buffer")
     .delete()
-    .in("id", ids)
-    .catch((e) => console.error("Buffer clear error:", e));
+    .in("id", ids);
+  if (deleteError) {
+    console.error("Buffer clear error:", deleteError.message);
+  }
 
   console.log(
     `📦 Burst: ${buffered.length} messages merged → "${combinedText.slice(0, 100)}"`

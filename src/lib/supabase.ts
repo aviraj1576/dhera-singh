@@ -1,20 +1,23 @@
 // src/lib/supabase.ts
 import { createClient } from "@supabase/supabase-js";
 
-// ── Validate env vars at module load time ──────────────────────────────────
-// Fix #19: fail loudly if env not set instead of using placeholder URLs
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Check if we are in Next.js build phase
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
 
-if (!supabaseUrl || supabaseUrl.includes("placeholder")) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL is not set or is still the placeholder value");
-}
-if (!supabaseAnonKey || supabaseAnonKey.includes("placeholder")) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not set or is still the placeholder value");
-}
-if (!supabaseServiceKey || supabaseServiceKey.includes("placeholder")) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set or is still the placeholder value");
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || (isBuildPhase ? "https://placeholder-url.supabase.co" : "");
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || (isBuildPhase ? "placeholder-key" : "");
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || (isBuildPhase ? "placeholder-key" : "");
+
+if (!isBuildPhase) {
+    if (!supabaseUrl || supabaseUrl.includes("placeholder")) {
+        throw new Error("NEXT_PUBLIC_SUPABASE_URL is not set or is still the placeholder value");
+    }
+    if (!supabaseAnonKey || supabaseAnonKey.includes("placeholder")) {
+        throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not set or is still the placeholder value");
+    }
+    if (!supabaseServiceKey || supabaseServiceKey.includes("placeholder")) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set or is still the placeholder value");
+    }
 }
 
 // ── Public client (browser-safe, respects RLS) ─────────────────────────────

@@ -2,52 +2,50 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { recalculateAllProductPrices } from "@/lib/price-calculator";
+import { requireAdminKey } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { prices } = body as {
-      prices: Record<string, number>; // e.g. { '22K': 5800, 'Silver': 92 }
-    };
+    const authError = requireAdminKey(request);
+    if (authError) return authError;
 
-    if (!prices || typeof prices !== "object") {
-      return NextResponse.json(
-        { error: "Request body must include a 'prices' object" },
-        { status: 400 }
-      );
-    }
+    try {
+        const body = await request.json();
+        const { prices } = body as { prices: Record<string, number> };
 
-    // Update each provided karat price
-    const updatePromises = Object.entries(prices).map(
-      async ([karatLabel, pricePerGram]) => {
-        if (typeof pricePerGram !== "number" || pricePerGram < 0) return;
-        const { error } = await supabaseAdmin
-          .from("metal_prices")
-          .update({
-            price_per_gram: pricePerGram,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("karat_label", karatLabel);
-
-        if (error) {
-          console.error(`Failed to update ${karatLabel}:`, error.message);
+        if (!prices || typeof prices !== "object" || Object.keys(prices).length === 0) {
+            return NextResponse.json(
+                { error: "Request body must include a non-empty 'prices' object" },
+                { status: 400 }
+            );
         }
-      }
-    );
 
-    await Promise.all(updatePromises);
+        const validKarats = ["24K", "22K", "18K", "16K", "14K", "Silver"];
+        const updatePromises = Object.entries(prices)
+            .filter(([karat, price]) =>
+                validKarats.includes(karat) &&
+                typeof price === "number" &&
+                price >= 0 &&
+                price < 1_000_000 // sanity cap
+            )
+            .map(([karat, price]) =>
+                supabaseAdmin
+                    .from("metal_prices")
+                    .update({ price_per_gram: price, updated_at: new Date().toISOString() })
+                    .eq("karat_label", karat)
+            );
 
-    // Recalculate all product prices immediately
-    const result = await recalculateAllProductPrices();
+        await Promise.all(updatePromises);
 
-    return NextResponse.json({
-      success: true,
-      message: `Metal prices updated. ${result.updated} products recalculated, ${result.skipped} skipped.`,
-      updated_at: new Date().toISOString(),
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("update-prices error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+        const result = await recalculateAllProductPrices();
+
+        return NextResponse.json({
+            success: true,
+            message: `${result.updated} products updated, ${result.skipped} skipped, ${result.errors} errors`,
+            updated_at: new Date().toISOString(),
+        });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        console.error("update-prices error:", message);
+        return NextResponse.json({ error: message }, { status: 500 });
+    }
 }

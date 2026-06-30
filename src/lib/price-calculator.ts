@@ -12,8 +12,7 @@ export async function recalculateAllProductPrices(): Promise<{
     .from("admin_config")
     .select("value")
     .eq("key", lockKey)
-    .single()
-    .catch(() => ({ data: null }));
+    .maybeSingle();
 
   if (existingLock?.value === "locked") {
     console.log("⏭️ Price recalculation already running — skipping");
@@ -23,8 +22,7 @@ export async function recalculateAllProductPrices(): Promise<{
   // Set lock
   await supabaseAdmin
     .from("admin_config")
-    .upsert({ key: lockKey, value: "locked" })
-    .catch(() => null);
+    .upsert({ key: lockKey, value: "locked" });
 
   let updated = 0;
   let skipped = 0;
@@ -101,8 +99,7 @@ export async function recalculateAllProductPrices(): Promise<{
     // Always release the lock
     await supabaseAdmin
       .from("admin_config")
-      .upsert({ key: lockKey, value: "unlocked" })
-      .catch(() => null);
+      .upsert({ key: lockKey, value: "unlocked" });
   }
 }
 
