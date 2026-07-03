@@ -39,23 +39,23 @@ function ClassyInput({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function AutomationTab() {
   // Context fields (Step 01 + 02)
-  const [keywords,    setKeywords]    = useState("");
+  const [keywords, setKeywords] = useState("");
   const [explanation, setExplanation] = useState("");
 
   // Product fields (Step 03)
-  const [instagramLink,    setInstagramLink]    = useState("");
-  const [productId,        setProductId]        = useState("");
-  const [weight,           setWeight]           = useState("");
-  const [purity,           setPurity]           = useState("");
-  const [price,            setPrice]            = useState("");
-  const [makingCharges,    setMakingCharges]    = useState("");
-  const [stoneValue,       setStoneValue]       = useState("");
-  const [diamondValue,     setDiamondValue]     = useState("");
-  const [polkiValue,       setPolkiValue]       = useState("");
+  const [instagramLink, setInstagramLink] = useState("");
+  const [productId, setProductId] = useState("");
+  const [weight, setWeight] = useState("");
+  const [purity, setPurity] = useState("");
+  const [price, setPrice] = useState("");
+  const [makingCharges, setMakingCharges] = useState("");
+  const [stoneValue, setStoneValue] = useState("");
+  const [diamondValue, setDiamondValue] = useState("");
+  const [polkiValue, setPolkiValue] = useState("");
 
-  const [loading,  setLoading]  = useState(false);
-  const [success,  setSuccess]  = useState("");
-  const [error,    setError]    = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
 
   const showMessage = (msg: string, isError = false) => {
     if (isError) setError(msg);
@@ -71,10 +71,13 @@ export default function AutomationTab() {
     }
     setLoading(true);
     try {
-      const res  = await fetch("/api/add-context", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ keywords, explanation }),
+      const res = await fetch("/api/add-context", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+        },
+        body: JSON.stringify({ keywords, explanation }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -100,20 +103,23 @@ export default function AutomationTab() {
     }
     setLoading(true);
     try {
-      const res  = await fetch("/api/add-product", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          product_id:             productId,
-          name:                   productId,       // default name to product ID, owner can edit in Supabase later
-          instagram_link:         instagramLink,
-          weight_grams:           weight,
+      const res = await fetch("/api/add-product", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+        },
+        body: JSON.stringify({
+          product_id: productId,
+          name: productId,       // default name to product ID, owner can edit in Supabase later
+          instagram_link: instagramLink,
+          weight_grams: weight,
           purity,
           making_charges_percent: makingCharges,
-          stone_value:            stoneValue,
-          diamond_value:          diamondValue,
-          polki_value:            polkiValue,
-          fixed_price:            price,
+          stone_value: stoneValue,
+          diamond_value: diamondValue,
+          polki_value: polkiValue,
+          fixed_price: price,
         }),
       });
       const data = await res.json();
@@ -250,14 +256,14 @@ export default function AutomationTab() {
                   <div className="md:col-span-2 lg:col-span-3">
                     <ClassyInput label="Instagram Hyperlink" placeholder="https://instagram.com/p/..." type="url" value={instagramLink} onChange={setInstagramLink} />
                   </div>
-                  <ClassyInput label="Product ID"           placeholder="e.g. SKU-1049"  value={productId}     onChange={setProductId} />
-                  <ClassyInput label="Weight (grams)"       placeholder="0.00 gm"        value={weight}        onChange={setWeight} />
-                  <ClassyInput label="Purity"               placeholder="e.g. 22K"       value={purity}        onChange={setPurity} />
-                  <ClassyInput label="Price (Optional)"     placeholder="₹ 0.00"         value={price}         onChange={setPrice} />
-                  <ClassyInput label="Making Charges (%)"   placeholder="0%"             value={makingCharges} onChange={setMakingCharges} />
-                  <ClassyInput label="Stone + Wax Value"    placeholder="₹ 0.00"         value={stoneValue}    onChange={setStoneValue} />
-                  <ClassyInput label="Diamond Value"        placeholder="₹ 0.00"         value={diamondValue}  onChange={setDiamondValue} />
-                  <ClassyInput label="Polki Value"          placeholder="₹ 0.00"         value={polkiValue}    onChange={setPolkiValue} />
+                  <ClassyInput label="Product ID" placeholder="e.g. SKU-1049" value={productId} onChange={setProductId} />
+                  <ClassyInput label="Weight (grams)" placeholder="0.00 gm" value={weight} onChange={setWeight} />
+                  <ClassyInput label="Purity" placeholder="e.g. 22K" value={purity} onChange={setPurity} />
+                  <ClassyInput label="Price (Optional)" placeholder="₹ 0.00" value={price} onChange={setPrice} />
+                  <ClassyInput label="Making Charges (%)" placeholder="0%" value={makingCharges} onChange={setMakingCharges} />
+                  <ClassyInput label="Stone + Wax Value" placeholder="₹ 0.00" value={stoneValue} onChange={setStoneValue} />
+                  <ClassyInput label="Diamond Value" placeholder="₹ 0.00" value={diamondValue} onChange={setDiamondValue} />
+                  <ClassyInput label="Polki Value" placeholder="₹ 0.00" value={polkiValue} onChange={setPolkiValue} />
                 </div>
               </div>
             </div>

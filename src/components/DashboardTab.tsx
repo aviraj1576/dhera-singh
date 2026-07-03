@@ -12,25 +12,25 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Conversation {
-  id:                  string;
-  platform:            string;
-  sender_id:           string;
+  id: string;
+  platform: string;
+  sender_id: string;
   instagram_post_link: string | null;
-  human_message:       string;
-  ai_response:         string | null;
-  status:              "ai_answered" | "human_needed" | "human_replied";
-  human_reply:         string | null;
+  human_message: string;
+  ai_response: string | null;
+  status: "ai_answered" | "human_needed" | "human_replied";
+  human_reply: string | null;
   response_latency_ms: number | null;
-  created_at:          string;
+  created_at: string;
 }
 
 interface DashboardStats {
-  aiAnswered:   number;
+  aiAnswered: number;
   humanPending: number;
-  avgLatency:   string;
-  recent:       Conversation[];
-  volumeData:   { day: string; queries: number }[];
-  metalPrices:  { karat_label: string; price_per_gram: number; updated_at: string }[];
+  avgLatency: string;
+  recent: Conversation[];
+  volumeData: { day: string; queries: number }[];
+  metalPrices: { karat_label: string; price_per_gram: number; updated_at: string }[];
 }
 
 // ─── Custom Tooltip for Recharts ──────────────────────────────────────────────
@@ -61,11 +61,10 @@ function StatCard({
 }) {
   return (
     <div
-      className={`relative p-6 md:p-8 rounded-3xl border shadow-sm overflow-hidden transition-all duration-500 hover:-translate-y-1 ${
-        alert
+      className={`relative p-6 md:p-8 rounded-3xl border shadow-sm overflow-hidden transition-all duration-500 hover:-translate-y-1 ${alert
           ? "bg-gradient-to-br from-white to-red-50/40 border-red-100 hover:border-red-200 hover:shadow-[0_10px_30px_rgba(217,83,79,0.1)]"
           : "bg-gradient-to-br from-white to-[#F8F7F5] border-[#EADDCD]/60 hover:border-[#CFA052]/40 hover:shadow-[0_10px_30px_rgba(212,175,55,0.08)]"
-      }`}
+        }`}
     >
       <div className="flex justify-between items-start mb-8 relative z-10">
         <div className={`p-3 rounded-2xl border shadow-sm ${alert ? "bg-red-50 border-red-100" : "bg-white border-[#EADDCD]"}`}>
@@ -160,13 +159,17 @@ function ReplyModal({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function DashboardTab() {
-  const [stats, setStats]                   = useState<DashboardStats | null>(null);
-  const [loading, setLoading]               = useState(true);
-  const [replyTarget, setReplyTarget]       = useState<Conversation | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [replyTarget, setReplyTarget] = useState<Conversation | null>(null);
 
   const loadStats = async () => {
     try {
-      const res  = await fetch("/api/dashboard-stats");
+      const res = await fetch("/api/dashboard-stats", {
+        headers: {
+          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+        },
+      });
       const data = await res.json();
       setStats(data);
     } catch (e) {
@@ -192,11 +195,11 @@ export default function DashboardTab() {
 
   // Static latency chart for visual until we have enough data points
   const latencyData = [
-    { time: "9 AM",  latency: 1.2 },
+    { time: "9 AM", latency: 1.2 },
     { time: "12 PM", latency: 1.5 },
-    { time: "3 PM",  latency: 0.8 },
-    { time: "6 PM",  latency: 1.4 },
-    { time: "Now",   latency: parseFloat(stats?.avgLatency ?? "1.0") || 1.0 },
+    { time: "3 PM", latency: 0.8 },
+    { time: "6 PM", latency: 1.4 },
+    { time: "Now", latency: parseFloat(stats?.avgLatency ?? "1.0") || 1.0 },
   ];
 
   return (
@@ -268,8 +271,8 @@ export default function DashboardTab() {
               <AreaChart data={latencyData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorLatency" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#CFA052" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#CFA052" stopOpacity={0}   />
+                    <stop offset="5%" stopColor="#CFA052" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#CFA052" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0EBE1" />
@@ -355,20 +358,18 @@ export default function DashboardTab() {
 
                   {/* AI / Human reply */}
                   <div
-                    className={`border p-6 md:p-7 rounded-2xl rounded-bl-none ml-4 md:ml-12 shadow-sm transition-colors ${
-                      log.status === "human_needed"
+                    className={`border p-6 md:p-7 rounded-2xl rounded-bl-none ml-4 md:ml-12 shadow-sm transition-colors ${log.status === "human_needed"
                         ? "border-red-200 bg-red-50/50"
                         : "border-[#CFA052]/30 bg-gradient-to-br from-white to-[#FDFBF7]"
-                    }`}
+                      }`}
                   >
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-center gap-3">
                         <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
-                            log.status === "human_needed"
+                          className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md ${log.status === "human_needed"
                               ? "bg-red-100"
                               : "bg-gradient-to-br from-[#D4AF37] to-[#CFA052]"
-                          }`}
+                            }`}
                         >
                           <Bot size={18} className={log.status === "human_needed" ? "text-red-500" : "text-white"} />
                         </div>

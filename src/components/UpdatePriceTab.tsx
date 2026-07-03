@@ -7,17 +7,17 @@ const KARATS = ["24K", "22K", "18K", "16K", "14K", "Silver"] as const;
 type Karat = (typeof KARATS)[number];
 
 export default function UpdatePriceTab() {
-  const [prices,       setPrices]       = useState<Partial<Record<Karat, string>>>({});
-  const [lastUpdated,  setLastUpdated]  = useState<string | null>(null);
-  const [loading,      setLoading]      = useState(false);
-  const [success,      setSuccess]      = useState(false);
-  const [error,        setError]        = useState("");
+  const [prices, setPrices] = useState<Partial<Record<Karat, string>>>({});
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState("");
 
   // Load current prices on mount
   useEffect(() => {
     const load = async () => {
       try {
-        const res  = await fetch("/api/dashboard-stats");
+        const res = await fetch("/api/dashboard-stats");
         const data = await res.json();
         if (data.metalPrices?.length) {
           const map: Partial<Record<Karat, string>> = {};
@@ -55,10 +55,13 @@ export default function UpdatePriceTab() {
         return;
       }
 
-      const res  = await fetch("/api/update-prices", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ prices: priceMap }),
+      const res = await fetch("/api/update-prices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+        },
+        body: JSON.stringify({ prices: priceMap }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
