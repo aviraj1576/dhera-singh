@@ -494,7 +494,7 @@ export async function runJewelleryAgent(input: AgentInput): Promise<AgentOutput>
   try {
     const response = await Promise.race([
       anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-20250514",
         max_tokens: 100,
         system: `You are the customer service AI for Dhera Singh Jewellers, Punjab, India.
 STRICT RULES:

@@ -17,7 +17,11 @@ export default function UpdatePriceTab() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("/api/dashboard-stats");
+        const res = await fetch("/api/dashboard-stats", {
+          headers: {
+            "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+          },
+        });
         const data = await res.json();
         if (data.metalPrices?.length) {
           const map: Partial<Record<Karat, string>> = {};

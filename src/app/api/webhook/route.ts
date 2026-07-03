@@ -686,7 +686,7 @@ async function sendIGDM(recipientId: string, message: string) {
   if (!process.env.INSTAGRAM_ACCESS_TOKEN || !message.trim()) return;
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
+      `https://graph.facebook.com/v22.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -708,7 +708,7 @@ async function replyToComment(commentId: string, message: string): Promise<boole
   if (!process.env.INSTAGRAM_ACCESS_TOKEN || !message.trim()) return false;
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${commentId}/replies?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
+      `https://graph.facebook.com/v22.0/${commentId}/replies?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -735,7 +735,7 @@ async function sendWA(to: string, message: string) {
   ) return;
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      `https://graph.facebook.com/v22.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
       {
         method: "POST",
         headers: {

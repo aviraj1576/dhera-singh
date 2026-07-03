@@ -107,7 +107,10 @@ function ReplyModal({
     try {
       const res = await fetch("/api/human-reply", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
+        },
         body: JSON.stringify({
           conversation_id: conversation.id,
           reply_text: text.trim(),
