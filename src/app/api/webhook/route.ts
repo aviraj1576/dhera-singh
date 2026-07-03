@@ -549,10 +549,10 @@ async function handleInstagramComment(value: Record<string, unknown>) {
   // Send DM with price/details — ALWAYS send when we have a reply
   // (even if some fields are missing, send what we have)
   if (reply.trim()) {
-    await sendIGDM(senderId, reply);
+    await sendIGDM(senderId, reply, commentId);
     if (followUp?.trim()) {
       await sleep(1500);
-      await sendIGDM(senderId, followUp);
+      await sendIGDM(senderId, followUp, commentId);
     }
   }
 }
@@ -831,16 +831,17 @@ async function saveConversation(data: {
 // ─────────────────────────────────────────────────────────────────────────────
 // SEND HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-async function sendIGDM(recipientId: string, message: string) {
+async function sendIGDM(recipientId: string, message: string, commentId?: string) {
   if (!process.env.INSTAGRAM_ACCESS_TOKEN || !message.trim()) return;
   try {
+    const recipient = commentId ? { comment_id: commentId } : { id: recipientId };
     const res = await fetch(
-      `https://graph.facebook.com/v22.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
+      `https://graph.facebook.com/v22.0/${process.env.INSTAGRAM_PAGE_ID}/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          recipient: { id: recipientId },
+          recipient,
           message: { text: message },
           messaging_type: "RESPONSE",
         }),
