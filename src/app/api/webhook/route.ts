@@ -6,40 +6,35 @@ import {
   extractLinkFromMessage,
   normaliseLink,
   detectIntent,
-  bufferAndProcess,  // ADD THIS
 } from "@/lib/anthropic";
 import { createHmac } from "crypto";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Fix #18: validate at load time — if missing, self-reply guard is broken
 const OUR_PAGE_ID = process.env.INSTAGRAM_PAGE_ID ?? "";
-if (!OUR_PAGE_ID) {
-  console.error(
-    "❌ CRITICAL: INSTAGRAM_PAGE_ID env var not set — bot self-reply protection is DISABLED"
-  );
-}
+const FUNCTION_TIMEOUT = 8500;
+const RATE_LIMIT_MAX = 8;
+const RATE_LIMIT_WINDOW = 5 * 60 * 1000;
 
-const FUNCTION_TIMEOUT_MS = 8000; // bail before Vercel's 10s hard limit
-const RATE_LIMIT_MAX = 8;    // messages per sender per window
-const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
+// List of exact strings the bot itself sends as public comment replies
+// Used to detect and ignore our own comments coming back as webhook events
+const BOT_COMMENT_SIGNATURES = [
+  "sat shri akal ji ?? please check your dm",
+  "sat shri akal ji 🙏 please check your dm",
+  "please check your dm for the details",
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECURITY — verify every POST is actually from Meta
-// Fix #9: rawBody is read once and passed through, not re-read
+// SECURITY
 // ─────────────────────────────────────────────────────────────────────────────
 function verifyMetaSignature(signature: string | null, rawBody: string): boolean {
   const appSecret = process.env.INSTAGRAM_APP_SECRET;
   if (!appSecret) {
-    console.warn("⚠️ INSTAGRAM_APP_SECRET not set — skipping signature check (dev mode only)");
+    console.warn("⚠️ INSTAGRAM_APP_SECRET not set — skipping verification");
     return true;
   }
-  if (!signature) {
-    console.error("❌ Missing x-hub-signature-256 header");
-    return false;
-  }
+  if (!signature) return false;
   const expected =
     "sha256=" +
     createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex");
@@ -47,62 +42,72 @@ function verifyMetaSignature(signature: string | null, rawBody: string): boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DEDUPLICATION — DB-based to work across all Vercel instances
-// Fix #10: auto-cleanup via created_at filter, not table growth forever
+// DEDUPLICATION — DB-based
 // ─────────────────────────────────────────────────────────────────────────────
 async function alreadyProcessed(eventId: string): Promise<boolean> {
   try {
     const { error } = await supabaseAdmin
       .from("processed_events")
       .insert({ event_id: eventId });
-
-    // Unique violation = already processed
     if (error?.code === "23505") return true;
-    if (error) console.error("Dedup insert error:", error.message);
+    if (error) console.error("Dedup error:", error.message);
     return false;
   } catch {
-    // On error, allow processing — better to reply twice than not at all
     return false;
   }
 }
 
-// Cleanup events older than 48h — called opportunistically, not on every request
-async function cleanupOldEvents() {
+// ─────────────────────────────────────────────────────────────────────────────
+// BURST DEDUPLICATION
+// Prevents replying twice to the same sender within 5 seconds
+// This replaces the broken sleep-based buffer
+// ─────────────────────────────────────────────────────────────────────────────
+async function recentlyRepliedTo(
+  senderId: string,
+  platform: string,
+  windowMs = 5000
+): Promise<boolean> {
+  try {
+    const cutoff = new Date(Date.now() - windowMs).toISOString();
+    const { data } = await supabaseAdmin
+      .from("recent_replies")
+      .select("replied_at")
+      .eq("sender_id", senderId)
+      .eq("platform", platform)
+      .gte("replied_at", cutoff)
+      .maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
+async function markReplied(senderId: string, platform: string) {
   try {
     await supabaseAdmin
-      .from("processed_events")
-      .delete()
-      .lt(
-        "created_at",
-        new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      .from("recent_replies")
+      .upsert(
+        { sender_id: senderId, platform, replied_at: new Date().toISOString() },
+        { onConflict: "sender_id,platform" }
       );
-  } catch {
-    // Non-critical, ignore
+  } catch (e) {
+    console.error("markReplied error:", e);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RATE LIMITING
-// Fix #11: safe DB upsert that never throws on missing row
 // ─────────────────────────────────────────────────────────────────────────────
 async function isRateLimited(senderId: string): Promise<boolean> {
   try {
     const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW).toISOString();
-
-    // Use upsert-style logic: fetch first, then update
-    const { data, error } = await supabaseAdmin
+    const { data } = await supabaseAdmin
       .from("sender_rate_limits")
       .select("message_count, window_start")
       .eq("sender_id", senderId)
-      .maybeSingle(); // Fix #11: maybeSingle() returns null on 0 rows, never throws
-
-    if (error) {
-      console.error("Rate limit fetch error:", error.message);
-      return false; // allow on error
-    }
+      .maybeSingle();
 
     if (!data) {
-      // First message from this sender
       await supabaseAdmin.from("sender_rate_limits").insert({
         sender_id: senderId,
         window_start: new Date().toISOString(),
@@ -112,7 +117,6 @@ async function isRateLimited(senderId: string): Promise<boolean> {
       return false;
     }
 
-    // Window expired — reset
     if (new Date(data.window_start) < new Date(windowStart)) {
       await supabaseAdmin
         .from("sender_rate_limits")
@@ -125,13 +129,11 @@ async function isRateLimited(senderId: string): Promise<boolean> {
       return false;
     }
 
-    // Within window — check limit
     if (data.message_count >= RATE_LIMIT_MAX) {
-      console.warn(`⚠️ Rate limit: ${senderId} (${data.message_count} messages)`);
+      console.warn(`⚠️ Rate limit hit: ${senderId}`);
       return true;
     }
 
-    // Increment
     await supabaseAdmin
       .from("sender_rate_limits")
       .update({
@@ -148,7 +150,7 @@ async function isRateLimited(senderId: string): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET: Webhook verification
+// GET: Verification
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -164,24 +166,19 @@ export async function GET(request: NextRequest) {
     console.log("✅ Webhook verified");
     return new NextResponse(challenge, { status: 200 });
   }
-
-  console.error("❌ Webhook verification failed — token mismatch");
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST: Receive events
-// Fix #9: read rawBody ONCE, pass it everywhere
+// POST: Events
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  // Read body once
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
 
-  // Security check
   if (!verifyMetaSignature(signature, rawBody)) {
-    console.error("❌ Invalid Meta signature — dropping");
-    return NextResponse.json({ status: "ok" }); // 200 to stop retries
+    console.error("❌ Invalid signature");
+    return NextResponse.json({ status: "ok" });
   }
 
   let body: Record<string, unknown>;
@@ -191,42 +188,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: "ok" });
   }
 
-  // Run cleanup opportunistically (1 in 50 requests)
-  if (Math.random() < 0.02) {
-    cleanupOldEvents().catch(() => null);
-  }
+  // Opportunistic cleanup
+  if (Math.random() < 0.02) cleanupOldEvents().catch(() => null);
 
-  // Hard timeout — always return before Vercel kills us
   try {
     await Promise.race([
       processEvent(body),
       new Promise<void>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("FUNCTION_TIMEOUT")),
-          FUNCTION_TIMEOUT_MS
-        )
+        setTimeout(() => reject(new Error("TIMEOUT")), FUNCTION_TIMEOUT)
       ),
     ]);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg === "FUNCTION_TIMEOUT") {
-      console.error("⏰ Webhook function timed out");
-    } else {
-      console.error("Webhook error:", msg);
-    }
+    console.error("Webhook error:", err instanceof Error ? err.message : err);
   }
 
   return NextResponse.json({ status: "ok" });
 }
 
+async function cleanupOldEvents() {
+  await supabaseAdmin
+    .from("processed_events")
+    .delete()
+    .lt("created_at", new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString());
+  await supabaseAdmin
+    .from("recent_replies")
+    .delete()
+    .lt("replied_at", new Date(Date.now() - 60 * 1000).toISOString());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 async function processEvent(body: Record<string, unknown>) {
   if (!body || typeof body !== "object") return;
-  if (body.object === "instagram") {
-    await handleInstagram(body);
-  } else if (body.object === "whatsapp_business_account") {
-    await handleWhatsApp(body);
-  }
+  if (body.object === "instagram") await handleInstagram(body);
+  else if (body.object === "whatsapp_business_account") await handleWhatsApp(body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,7 +245,6 @@ async function handleInstagram(body: Record<string, unknown>) {
           change.value as Record<string, unknown>
         ).catch((e) => console.error("Comment handler crashed:", e));
       }
-      // All other change types (story_insights, live_comments, etc.) are ignored
     }
   }
 }
@@ -261,17 +254,18 @@ async function handleInstagramDM(event: Record<string, unknown>) {
   const msg = event.message as Record<string, unknown> | undefined;
   if (!msg) return;
 
-  // GUARD: Echo — bot's own sent messages reflected back
+  // GUARD: Skip echoes and reactions
   if (msg.is_echo) return;
-
-  // GUARD: Reaction events (thumbs up on a message, etc.)
   if (msg.reaction) return;
 
   const senderId = (event.sender as { id?: string })?.id;
   if (!senderId) return;
 
   // GUARD: Never reply to ourselves
-  if (OUR_PAGE_ID && senderId === OUR_PAGE_ID) return;
+  if (OUR_PAGE_ID && senderId === OUR_PAGE_ID) {
+    console.log("⏭️ Skipping — sender is our own page");
+    return;
+  }
 
   // GUARD: Deduplicate
   const mid = (msg.mid as string | undefined) ?? "";
@@ -286,7 +280,7 @@ async function handleInstagramDM(event: Record<string, unknown>) {
   const messageText = ((msg.text as string | undefined) ?? "").trim();
   const msgType = classifyAttachment(msg);
 
-  // GUARD: Unsupported media (voice notes, files, locations, stickers)
+  // Unsupported media
   if (msgType === "unsupported") {
     await sendIGDM(
       senderId,
@@ -296,7 +290,7 @@ async function handleInstagramDM(event: Record<string, unknown>) {
       platform: "instagram_dm",
       sender_id: senderId,
       post_link: null,
-      human_message: "[unsupported media type]",
+      human_message: "[unsupported media]",
       ai_response: null,
       status: "human_needed",
       latency: 0,
@@ -304,16 +298,33 @@ async function handleInstagramDM(event: Record<string, unknown>) {
     return;
   }
 
-  // Fix #12: safe attachment extraction
   const attachedLink = safeExtractAttachedLink(msg);
   const textLink = extractLinkFromMessage(messageText);
   const resolvedLink = attachedLink || textLink;
 
-  // Guard: completely empty message with no attachment
   if (!messageText && !resolvedLink && msgType !== "image") return;
 
+  // GUARD: Burst deduplication — don't reply to same sender twice in 5s
+  // This handles the case where someone sends 3 messages rapidly
+  // We process the FIRST one, the others get deduplicated here
+  const alreadyReplied = await recentlyRepliedTo(senderId, "instagram_dm");
+  if (alreadyReplied) {
+    console.log(`⏭️ Already replied to ${senderId} recently — skipping burst message`);
+    // Still save the message so owner can see the full conversation
+    await saveConversation({
+      platform: "instagram_dm",
+      sender_id: senderId,
+      post_link: resolvedLink,
+      human_message: messageText || `[${msgType}]`,
+      ai_response: null,
+      status: "human_needed",
+      latency: 0,
+    });
+    return;
+  }
+
   console.log(
-    `📨 IG DM | ${senderId} | "${messageText.slice(0, 80)}" | type:${msgType} | link:${resolvedLink ?? "none"}`
+    `📨 IG DM | ${senderId} | "${messageText.slice(0, 80)}" | link:${resolvedLink ?? "none"}`
   );
 
   const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
@@ -338,9 +349,8 @@ async function handleInstagramDM(event: Record<string, unknown>) {
 
   if (reply.trim()) {
     await sendIGDM(senderId, reply);
+    await markReplied(senderId, "instagram_dm");
 
-    // Fix #6: only send followUp when NOT escalating
-    // Fix: don't ask for phone if they just gave it or said no
     if (!needsHuman && followUp?.trim()) {
       const intent = detectIntent(messageText);
       if (intent !== "phone_number" && intent !== "negative" && intent !== "thanks") {
@@ -361,51 +371,54 @@ async function handleInstagramComment(value: Record<string, unknown>) {
   const senderId = from?.id;
   const media = value.media as { id?: string; link?: string } | undefined;
 
-  // GUARD: Required fields
   if (!commentId || !senderId || !commentText) return;
 
-  // GUARD: Never reply to our own comments — PRIMARY loop prevention
+  // GUARD 1: Never reply to our own page
   if (OUR_PAGE_ID && senderId === OUR_PAGE_ID) {
-    console.log("⏭️ Own comment — skipping to prevent loop");
+    console.log("⏭️ Own page comment — skipping");
     return;
   }
 
-  // GUARD: Deduplicate
+  // GUARD 2: Detect if this is our own bot reply coming back as a webhook
+  // This is the critical fix for your screenshot bug
+  const lowerText = commentText.toLowerCase();
+  const isBotReply = BOT_COMMENT_SIGNATURES.some((sig) =>
+    lowerText.includes(sig)
+  );
+  if (isBotReply) {
+    console.log("⏭️ This is our own bot comment — ignoring to prevent loop");
+    return;
+  }
+
+  // GUARD 3: Deduplicate
   if (await alreadyProcessed(`ig_comment_${commentId}`)) {
     console.log("⏭️ Duplicate comment:", commentId);
     return;
   }
 
-  // GUARD: Rate limit per commenter
+  // GUARD 4: Rate limit
   if (await isRateLimited(`ig_comment_${senderId}`)) {
-    console.log("⏭️ Rate limited commenter:", senderId);
+    console.log("⏭️ Comment rate limited:", senderId);
     return;
   }
 
   // Build post link
-  // Fix #31: log when we get numeric ID so owner knows why it wasn't matched
   let postLink: string | null = null;
   if (media?.link) {
     postLink = media.link;
-  } else if (media?.id) {
-    if (/^\d+$/.test(media.id)) {
-      // Numeric ID — cannot build shortcode URL, need to escalate
-      console.warn(
-        `⚠️ Got numeric media ID (${media.id}) — cannot build Instagram URL. Add product manually.`
-      );
-      postLink = null;
-    } else {
-      postLink = `https://www.instagram.com/p/${media.id}/`;
-    }
+  } else if (media?.id && !/^\d+$/.test(media.id)) {
+    postLink = `https://www.instagram.com/p/${media.id}/`;
   }
 
-  console.log(`💬 IG Comment | ${senderId} | "${commentText.slice(0, 80)}" | post:${postLink ?? "unknown"}`);
+  console.log(
+    `💬 IG Comment | ${senderId} | "${commentText.slice(0, 80)}" | post:${postLink ?? "unknown"}`
+  );
 
-  // GUARD: Only engage if post is in our products DB
+  // GUARD 5: Only engage with posts in our products DB
   const productExists = postLink ? await checkProductExists(postLink) : false;
 
   if (!productExists) {
-    console.log("⏭️ Post not in products DB — escalating silently");
+    console.log("⏭️ Post not in DB — human_needed, no reply");
     await saveConversation({
       platform: "instagram_comment",
       sender_id: senderId,
@@ -415,22 +428,16 @@ async function handleInstagramComment(value: Record<string, unknown>) {
       status: "human_needed",
       latency: 0,
     });
-    return; // No public reply, no DM — just flag for human
+    return;
   }
 
-  // Public reply — greeting + check DM only, NOTHING else
-  const commentReplied = await replyToComment(
+  // PUBLIC reply — ONLY greeting + check DM — NEVER price or any details
+  await replyToComment(
     commentId,
     "Sat Shri Akal Ji 🙏 Please check your DM for the details!"
   );
 
-  // Fix #14: if comment reply failed due to deleted post/network blip,
-  // still send the DM — customer should still get their answer
-  if (!commentReplied) {
-    console.warn("⚠️ Comment reply failed — still sending DM");
-  }
-
-  // Get AI response for DM
+  // Get the actual answer for the DM
   const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
     userMessage: commentText,
     instagramPostLink: postLink ?? undefined,
@@ -439,6 +446,7 @@ async function handleInstagramComment(value: Record<string, unknown>) {
     attachedLink: postLink ?? undefined,
   });
 
+  // Save the comment interaction (what the customer asked, what DM we sent)
   await saveConversation({
     platform: "instagram_comment",
     sender_id: senderId,
@@ -449,6 +457,7 @@ async function handleInstagramComment(value: Record<string, unknown>) {
     latency: latencyMs,
   });
 
+  // Send DM with price/details
   if (!needsHuman && reply.trim()) {
     await sendIGDM(senderId, reply);
     if (followUp?.trim()) {
@@ -471,12 +480,7 @@ async function handleWhatsApp(body: Record<string, unknown>) {
       if ((change.field as string) !== "messages") continue;
 
       const value = change.value as Record<string, unknown>;
-
-      // Fix #15: skip status update webhooks — correct path is value.statuses
-      if (value.statuses) {
-        console.log("⏭️ Skipping WA status update");
-        continue;
-      }
+      if (value.statuses) continue; // skip status updates
 
       const messages = (value.messages as Record<string, unknown>[]) ?? [];
       for (const msg of messages) {
@@ -493,26 +497,18 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
   const from = msg.from as string | undefined;
   const msgType = (msg.type as string | undefined) ?? "";
 
-  // Fix #16: validate senderId is non-empty string
-  if (!from || from.trim() === "") return;
+  if (!from?.trim()) return;
   const senderId = from.trim();
 
-  // GUARD: Skip status and reaction events
   if (msgType === "status" || msgType === "reaction") return;
 
-  // GUARD: Deduplicate
   if (msgId && await alreadyProcessed(`wa_${msgId}`)) {
     console.log("⏭️ Duplicate WA:", msgId);
     return;
   }
 
-  // GUARD: Rate limit
-  if (await isRateLimited(`wa_${senderId}`)) {
-    console.log("⏭️ WA rate limited:", senderId);
-    return;
-  }
+  if (await isRateLimited(`wa_${senderId}`)) return;
 
-  // Extract text safely from all message types
   const messageText = (
     (msg.text as { body?: string } | undefined)?.body ||
     (msg.image as { caption?: string } | undefined)?.caption ||
@@ -525,10 +521,7 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
   const isSticker = msgType === "sticker";
   const isLocation = msgType === "location";
   const isDocument = msgType === "document";
-  // Fix #13: video is NOT unsupported — it may have a caption with a link
-  const isVideo = msgType === "video";
 
-  // GUARD: Truly unsupported types — tell customer what to send
   if (isAudio || isSticker || isLocation || isDocument) {
     await sendWA(
       senderId,
@@ -546,14 +539,30 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
     return;
   }
 
+  // Burst deduplication for WhatsApp too
+  const alreadyReplied = await recentlyRepliedTo(senderId, "whatsapp");
+  if (alreadyReplied) {
+    console.log(`⏭️ Already replied to WA ${senderId} recently`);
+    await saveConversation({
+      platform: "whatsapp",
+      sender_id: senderId,
+      post_link: null,
+      human_message: messageText || `[${msgType}]`,
+      ai_response: null,
+      status: "human_needed",
+      latency: 0,
+    });
+    return;
+  }
+
   const resolvedLink = extractLinkFromMessage(messageText);
 
   console.log(
-    `📱 WA | ${senderId} | type:${msgType} | "${messageText.slice(0, 80)}" | link:${resolvedLink ?? "none"}`
+    `📱 WA | ${senderId} | type:${msgType} | "${messageText.slice(0, 80)}"`
   );
 
   const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
-    userMessage: messageText || (isImage ? "screenshot" : isVideo ? "video" : ""),
+    userMessage: messageText || (isImage ? "screenshot" : ""),
     instagramPostLink: resolvedLink,
     senderName: senderId,
     platform: "whatsapp",
@@ -573,6 +582,8 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
 
   if (reply.trim()) {
     await sendWA(senderId, reply);
+    await markReplied(senderId, "whatsapp");
+
     if (!needsHuman && followUp?.trim()) {
       const intent = detectIntent(messageText);
       if (intent !== "phone_number" && intent !== "negative" && intent !== "thanks") {
@@ -601,8 +612,7 @@ async function checkProductExists(postLink: string): Promise<boolean> {
       return false;
     }
     return (data?.length ?? 0) > 0;
-  } catch (e) {
-    console.error("Product lookup exception:", e);
+  } catch {
     return false;
   }
 }
@@ -614,22 +624,17 @@ function classifyAttachment(
   msg: Record<string, unknown>
 ): "text" | "image" | "reel" | "story_reply" | "unsupported" {
   const attachments = msg.attachments as
-    | { type?: string; payload?: Record<string, unknown> }[]
+    | { type?: string }[]
     | undefined;
   if (!attachments?.length) return "text";
-
   const type = (attachments[0]?.type ?? "").toLowerCase();
   if (!type) return "text";
-
   if (type === "image") return "image";
   if (type === "ig_reel" || type === "share" || type === "video") return "reel";
   if (type === "story_mention" || type === "story_reply") return "story_reply";
-
-  // audio, file, location, sticker, animated_image → unsupported
   return "unsupported";
 }
 
-// Fix #12: safe extraction that never throws
 function safeExtractAttachedLink(msg: Record<string, unknown>): string | undefined {
   try {
     const attachments = msg.attachments as Record<string, unknown>[] | undefined;
@@ -667,7 +672,7 @@ async function saveConversation(data: {
       status: data.status,
       response_latency_ms: data.latency,
     });
-    if (error) console.error("❌ DB save failed:", error.message);
+    if (error) console.error("❌ DB save:", error.message);
     else console.log("✅ Conversation saved");
   } catch (e) {
     console.error("❌ DB exception:", e);
@@ -675,15 +680,10 @@ async function saveConversation(data: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SEND HELPERS — all wrapped in try/catch, check for empty message
+// SEND HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendIGDM(recipientId: string, message: string) {
-  if (!process.env.INSTAGRAM_ACCESS_TOKEN) {
-    console.warn("⚠️ INSTAGRAM_ACCESS_TOKEN not set");
-    return;
-  }
-  if (!message.trim() || !recipientId) return;
-
+  if (!process.env.INSTAGRAM_ACCESS_TOKEN || !message.trim()) return;
   try {
     const res = await fetch(
       `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.INSTAGRAM_ACCESS_TOKEN}`,
@@ -697,18 +697,13 @@ async function sendIGDM(recipientId: string, message: string) {
         }),
       }
     );
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("❌ IG DM failed:", err);
-    } else {
-      console.log("✅ IG DM →", recipientId);
-    }
+    if (!res.ok) console.error("❌ IG DM failed:", await res.text());
+    else console.log("✅ IG DM →", recipientId);
   } catch (e) {
     console.error("❌ IG DM exception:", e);
   }
 }
 
-// Returns true on success, false on failure
 async function replyToComment(commentId: string, message: string): Promise<boolean> {
   if (!process.env.INSTAGRAM_ACCESS_TOKEN || !message.trim()) return false;
   try {
@@ -735,13 +730,9 @@ async function replyToComment(commentId: string, message: string): Promise<boole
 async function sendWA(to: string, message: string) {
   if (
     !process.env.WHATSAPP_ACCESS_TOKEN ||
-    !process.env.WHATSAPP_PHONE_NUMBER_ID
-  ) {
-    console.warn("⚠️ WhatsApp tokens not set");
-    return;
-  }
-  if (!message.trim() || !to) return;
-
+    !process.env.WHATSAPP_PHONE_NUMBER_ID ||
+    !message.trim()
+  ) return;
   try {
     const res = await fetch(
       `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,

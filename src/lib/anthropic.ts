@@ -235,9 +235,9 @@ const R = {
   sendToTeam: "Sat Shri Akal Ji 🙏 Our team will get back to you with the details shortly!",
   screenshotMsg: "Sat Shri Akal Ji 🙏 Please share the actual reel or post link and we'll get you all the details right away!",
   greeting: "Sat Shri Akal Ji 🙏 Welcome to Dhera Singh Jewellers! Please share the reel or post you're interested in and we'll help right away.",
-  negative: "Sat Shri Akal Ji 🙏 No problem at all — feel free to reach out anytime!",
-  thanks: "Sat Shri Akal Ji 🙏 Our pleasure! Feel free to ask anytime 🙏",
-  phoneReceived: "Sat Shri Akal Ji 🙏 Thank you! Our team will reach out to you very shortly.",
+  negative: "No problem at all — feel free to reach out anytime!",
+  thanks: "Our pleasure! Feel free to ask anytime 🙏",
+  phoneReceived: "Dhanwaad! Our team will reach out to you very shortly.",
   notFound: "Sat Shri Akal Ji 🙏 Our team will check and get back to you on this piece shortly!",
 } as const;
 
