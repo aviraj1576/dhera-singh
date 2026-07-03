@@ -82,20 +82,23 @@ export async function recalculateAllProductPrices(): Promise<{
       updates.push({ id: product.id, calculated_price: finalPrice, updated_at: now });
     }
 
-    // Execute in batches of 50 to stay within Supabase limits
-    const BATCH = 50;
-    for (let i = 0; i < updates.length; i += BATCH) {
-      const batch = updates.slice(i, i + BATCH);
-      const { error } = await supabaseAdmin
+    // Execute parallel updates
+    const promises = updates.map((u) =>
+      supabaseAdmin
         .from("products")
-        .upsert(batch, { onConflict: "id" });
-      if (error) {
-        console.error("Batch update error:", error.message);
-        errors += batch.length;
+        .update({ calculated_price: u.calculated_price, updated_at: u.updated_at })
+        .eq("id", u.id)
+    );
+
+    const results = await Promise.all(promises);
+    results.forEach((res) => {
+      if (res.error) {
+        console.error("Single product price update error:", res.error.message);
+        errors++;
       } else {
-        updated += batch.length;
+        updated++;
       }
-    }
+    });
 
     console.log(`✅ Price recalc: ${updated} updated, ${skipped} skipped, ${errors} errors`);
     return { updated, skipped, errors };

@@ -36,11 +36,18 @@ function verifyMetaSignature(signature: string | null, rawBody: string): boolean
     console.warn("⚠️ INSTAGRAM_APP_SECRET not set — skipping verification");
     return true;
   }
-  if (!signature) return false;
+  if (!signature) {
+    console.error("❌ Signature verification failed: x-hub-signature-256 header is missing");
+    return false;
+  }
   const expected =
     "sha256=" +
     createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex");
-  return signature === expected;
+  const isValid = signature === expected;
+  if (!isValid) {
+    console.error(`❌ Invalid signature. Expected: ${expected}, Got: ${signature}`);
+  }
+  return isValid;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,6 +228,7 @@ async function cleanupOldEvents() {
 // ─────────────────────────────────────────────────────────────────────────────
 async function processEvent(body: Record<string, unknown>) {
   if (!body || typeof body !== "object") return;
+  console.log("ℹ️ Incoming Meta webhook event payload:", JSON.stringify(body));
   if (body.object === "instagram") await handleInstagram(body);
   else if (body.object === "whatsapp_business_account") await handleWhatsApp(body);
 }
@@ -233,7 +241,12 @@ async function handleInstagram(body: Record<string, unknown>) {
   if (!entries.length) return;
 
   for (const entry of entries) {
-    const messaging = (entry.messaging as Record<string, unknown>[]) ?? [];
+    // Check both standard messaging and standby channels (useful if handover protocol is enabled)
+    const messaging = (entry.messaging as Record<string, unknown>[]) ??
+                      (entry.standby as Record<string, unknown>[]) ?? [];
+    if (messaging.length > 0) {
+      console.log(`ℹ️ Processing ${messaging.length} messaging/standby events`);
+    }
     for (const event of messaging) {
       await handleInstagramDM(event).catch((e) =>
         console.error("DM handler crashed:", e)
@@ -253,12 +266,22 @@ async function handleInstagram(body: Record<string, unknown>) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleInstagramDM(event: Record<string, unknown>) {
+  console.log("📩 DM event entry payload:", JSON.stringify(event));
   const msg = event.message as Record<string, unknown> | undefined;
-  if (!msg) return;
+  if (!msg) {
+    console.log("⏭️ DM event ignored: no event.message field present");
+    return;
+  }
 
   // GUARD: Skip echoes and reactions
-  if (msg.is_echo) return;
-  if (msg.reaction) return;
+  if (msg.is_echo) {
+    console.log("⏭️ Skipping — event is an echo");
+    return;
+  }
+  if (msg.reaction) {
+    console.log("⏭️ Skipping — event is a reaction");
+    return;
+  }
 
   const senderId = (event.sender as { id?: string })?.id;
   if (!senderId) return;
