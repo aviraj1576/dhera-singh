@@ -6,6 +6,7 @@ import {
   extractLinkFromMessage,
   normaliseLink,
   detectIntent,
+  detectAllIntents,
 } from "@/lib/anthropic";
 import { createHmac } from "crypto";
 
@@ -16,6 +17,7 @@ const OUR_PAGE_ID = process.env.INSTAGRAM_PAGE_ID ?? "";
 const FUNCTION_TIMEOUT = 8500;
 const RATE_LIMIT_MAX = 8;
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000;
+const BUFFER_WAIT_MS = 3000; // wait 3s for burst messages before processing
 
 // List of exact strings the bot itself sends as public comment replies
 // Used to detect and ignore our own comments coming back as webhook events
@@ -304,44 +306,110 @@ async function handleInstagramDM(event: Record<string, unknown>) {
 
   if (!messageText && !resolvedLink && msgType !== "image") return;
 
-  // GUARD: Burst deduplication — don't reply to same sender twice in 5s
-  // This handles the case where someone sends 3 messages rapidly
-  // We process the FIRST one, the others get deduplicated here
-  const alreadyReplied = await recentlyRepliedTo(senderId, "instagram_dm");
-  if (alreadyReplied) {
-    console.log(`⏭️ Already replied to ${senderId} recently — skipping burst message`);
-    // Still save the message so owner can see the full conversation
-    await saveConversation({
-      platform: "instagram_dm",
+  // ── BURST MESSAGE BUFFERING ──────────────────────────────────────────────
+  // Insert this message into the buffer and wait for more
+  const { data: inserted, error: bufferError } = await supabaseAdmin
+    .from("message_buffer")
+    .insert({
       sender_id: senderId,
-      post_link: resolvedLink,
-      human_message: messageText || `[${msgType}]`,
-      ai_response: null,
-      status: "human_needed",
-      latency: 0,
-    });
+      platform: "instagram_dm",
+      message: messageText || `[${msgType}]`,
+      resolved_link: resolvedLink ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (bufferError || !inserted) {
+    console.error("Buffer insert error:", bufferError?.message);
     return;
   }
 
+  // Wait for more messages to arrive
+  await sleep(BUFFER_WAIT_MS);
+
+  // Fetch all buffered messages from this sender in the last 10 seconds
+  const windowStart = new Date(Date.now() - 10_000).toISOString();
+  const { data: buffered } = await supabaseAdmin
+    .from("message_buffer")
+    .select("id, message, resolved_link, created_at")
+    .eq("sender_id", senderId)
+    .eq("platform", "instagram_dm")
+    .gte("created_at", windowStart)
+    .order("created_at", { ascending: true });
+
+  if (!buffered?.length) {
+    console.log("⏭️ Buffer empty — already processed by another handler");
+    return;
+  }
+
+  // Only the FIRST message in the burst should trigger processing
+  if (buffered[0].id !== inserted.id) {
+    console.log("⏭️ Not first in burst — another handler will process");
+    return;
+  }
+
+  // ── MERGE ALL BURST MESSAGES ─────────────────────────────────────────────
+  const combinedText = buffered
+    .map((b) => b.message)
+    .filter((m) => m && !m.startsWith("["))
+    .join(" ")
+    .trim();
+  const combinedLink =
+    buffered.find((b) => b.resolved_link)?.resolved_link ?? undefined;
+
+  // Clear the buffer
+  const bufferIds = buffered.map((b) => b.id);
+  await supabaseAdmin.from("message_buffer").delete().in("id", bufferIds);
+
   console.log(
-    `📨 IG DM | ${senderId} | "${messageText.slice(0, 80)}" | link:${resolvedLink ?? "none"}`
+    `📦 Burst: ${buffered.length} msgs merged → "${combinedText.slice(0, 100)}" | link:${combinedLink ?? "none"}`
   );
 
+  // ── CONTEXT LINK LOOKUP ──────────────────────────────────────────────────
+  // If user is asking about a product but didn't share a link in this burst,
+  // check their recent conversations for a previously shared link
+  let finalLink = combinedLink;
+  if (!finalLink) {
+    const allIntents = detectAllIntents(combinedText);
+    const needsLink =
+      allIntents.has("price") || allIntents.has("weight") ||
+      allIntents.has("purity") || allIntents.has("details");
+    if (needsLink) {
+      try {
+        const { data: recentWithLink } = await supabaseAdmin
+          .from("conversations")
+          .select("instagram_post_link")
+          .eq("sender_id", senderId)
+          .eq("platform", "instagram_dm")
+          .not("instagram_post_link", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (recentWithLink?.[0]?.instagram_post_link) {
+          finalLink = recentWithLink[0].instagram_post_link;
+          console.log(`🔗 Context link from history: ${finalLink}`);
+        }
+      } catch (e) {
+        console.error("Context link lookup error:", e);
+      }
+    }
+  }
+
+  // ── RUN AGENT ────────────────────────────────────────────────────────────
   const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
-    userMessage: messageText || (msgType === "image" ? "screenshot" : ""),
-    instagramPostLink: resolvedLink,
+    userMessage: combinedText || (msgType === "image" ? "screenshot" : ""),
+    instagramPostLink: finalLink,
     senderName: senderId,
     platform: "instagram_dm",
     messageType:
       msgType === "image" ? "image" : msgType === "reel" ? "reel" : "text",
-    attachedLink: resolvedLink,
+    attachedLink: finalLink,
   });
 
   await saveConversation({
     platform: "instagram_dm",
     sender_id: senderId,
-    post_link: resolvedLink,
-    human_message: messageText || `[${msgType}]`,
+    post_link: finalLink,
+    human_message: combinedText || `[${msgType}]`,
     ai_response: reply,
     status: needsHuman ? "human_needed" : "ai_answered",
     latency: latencyMs,
@@ -349,15 +417,36 @@ async function handleInstagramDM(event: Record<string, unknown>) {
 
   if (reply.trim()) {
     await sendIGDM(senderId, reply);
-    await markReplied(senderId, "instagram_dm");
 
     if (!needsHuman && followUp?.trim()) {
-      const intent = detectIntent(messageText);
+      const intent = detectIntent(combinedText);
       if (intent !== "phone_number" && intent !== "negative" && intent !== "thanks") {
         await sleep(1500);
         await sendIGDM(senderId, followUp);
       }
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESOLVE MEDIA PERMALINK — convert numeric Instagram media ID to permalink URL
+// ─────────────────────────────────────────────────────────────────────────────
+async function resolveMediaPermalink(mediaId: string): Promise<string | null> {
+  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+  if (!token || !mediaId) return null;
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v22.0/${mediaId}?fields=permalink&access_token=${token}`
+    );
+    if (!res.ok) {
+      console.error("❌ Media permalink fetch failed:", await res.text());
+      return null;
+    }
+    const data = await res.json();
+    return (data.permalink as string) ?? null;
+  } catch (e) {
+    console.error("❌ Media permalink exception:", e);
+    return null;
   }
 }
 
@@ -402,12 +491,12 @@ async function handleInstagramComment(value: Record<string, unknown>) {
     return;
   }
 
-  // Build post link
+  // Build post link — resolve numeric media ID to permalink via Graph API
   let postLink: string | null = null;
   if (media?.link) {
     postLink = media.link;
-  } else if (media?.id && !/^\d+$/.test(media.id)) {
-    postLink = `https://www.instagram.com/p/${media.id}/`;
+  } else if (media?.id) {
+    postLink = await resolveMediaPermalink(media.id);
   }
 
   console.log(
@@ -457,8 +546,9 @@ async function handleInstagramComment(value: Record<string, unknown>) {
     latency: latencyMs,
   });
 
-  // Send DM with price/details
-  if (!needsHuman && reply.trim()) {
+  // Send DM with price/details — ALWAYS send when we have a reply
+  // (even if some fields are missing, send what we have)
+  if (reply.trim()) {
     await sendIGDM(senderId, reply);
     if (followUp?.trim()) {
       await sleep(1500);
@@ -539,42 +629,102 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
     return;
   }
 
-  // Burst deduplication for WhatsApp too
-  const alreadyReplied = await recentlyRepliedTo(senderId, "whatsapp");
-  if (alreadyReplied) {
-    console.log(`⏭️ Already replied to WA ${senderId} recently`);
-    await saveConversation({
-      platform: "whatsapp",
+  // ── BURST MESSAGE BUFFERING ──────────────────────────────────────────────
+  const resolvedLink = extractLinkFromMessage(messageText);
+
+  const { data: inserted, error: bufferError } = await supabaseAdmin
+    .from("message_buffer")
+    .insert({
       sender_id: senderId,
-      post_link: null,
-      human_message: messageText || `[${msgType}]`,
-      ai_response: null,
-      status: "human_needed",
-      latency: 0,
-    });
+      platform: "whatsapp",
+      message: messageText || `[${msgType}]`,
+      resolved_link: resolvedLink ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (bufferError || !inserted) {
+    console.error("WA buffer insert error:", bufferError?.message);
     return;
   }
 
-  const resolvedLink = extractLinkFromMessage(messageText);
+  await sleep(BUFFER_WAIT_MS);
+
+  const windowStart = new Date(Date.now() - 10_000).toISOString();
+  const { data: buffered } = await supabaseAdmin
+    .from("message_buffer")
+    .select("id, message, resolved_link, created_at")
+    .eq("sender_id", senderId)
+    .eq("platform", "whatsapp")
+    .gte("created_at", windowStart)
+    .order("created_at", { ascending: true });
+
+  if (!buffered?.length) return;
+
+  if (buffered[0].id !== inserted.id) {
+    console.log("⏭️ WA: Not first in burst — skipping");
+    return;
+  }
+
+  const combinedText = buffered
+    .map((b) => b.message)
+    .filter((m) => m && !m.startsWith("["))
+    .join(" ")
+    .trim();
+  const combinedLink =
+    buffered.find((b) => b.resolved_link)?.resolved_link ?? undefined;
+
+  await supabaseAdmin.from("message_buffer").delete().in("id", buffered.map((b) => b.id));
 
   console.log(
-    `📱 WA | ${senderId} | type:${msgType} | "${messageText.slice(0, 80)}"`
+    `📦 WA Burst: ${buffered.length} msgs → "${combinedText.slice(0, 100)}" | link:${combinedLink ?? "none"}`
+  );
+
+  // Context link lookup
+  let finalLink = combinedLink;
+  if (!finalLink) {
+    const allIntents = detectAllIntents(combinedText);
+    const needsLink =
+      allIntents.has("price") || allIntents.has("weight") ||
+      allIntents.has("purity") || allIntents.has("details");
+    if (needsLink) {
+      try {
+        const { data: recentWithLink } = await supabaseAdmin
+          .from("conversations")
+          .select("instagram_post_link")
+          .eq("sender_id", senderId)
+          .eq("platform", "whatsapp")
+          .not("instagram_post_link", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (recentWithLink?.[0]?.instagram_post_link) {
+          finalLink = recentWithLink[0].instagram_post_link;
+          console.log(`🔗 WA context link from history: ${finalLink}`);
+        }
+      } catch (e) {
+        console.error("WA context link lookup error:", e);
+      }
+    }
+  }
+
+  console.log(
+    `📱 WA | ${senderId} | type:${msgType} | "${combinedText.slice(0, 80)}"`
   );
 
   const { reply, followUp, needsHuman, latencyMs } = await runJewelleryAgent({
-    userMessage: messageText || (isImage ? "screenshot" : ""),
-    instagramPostLink: resolvedLink,
+    userMessage: combinedText || (isImage ? "screenshot" : ""),
+    instagramPostLink: finalLink,
     senderName: senderId,
     platform: "whatsapp",
     messageType: isImage ? "image" : "text",
-    attachedLink: resolvedLink,
+    attachedLink: finalLink,
   });
 
   await saveConversation({
     platform: "whatsapp",
     sender_id: senderId,
-    post_link: resolvedLink,
-    human_message: messageText || `[${msgType}]`,
+    post_link: finalLink,
+    human_message: combinedText || `[${msgType}]`,
     ai_response: reply,
     status: needsHuman ? "human_needed" : "ai_answered",
     latency: latencyMs,
@@ -582,10 +732,9 @@ async function handleWhatsAppMessage(msg: Record<string, unknown>) {
 
   if (reply.trim()) {
     await sendWA(senderId, reply);
-    await markReplied(senderId, "whatsapp");
 
     if (!needsHuman && followUp?.trim()) {
-      const intent = detectIntent(messageText);
+      const intent = detectIntent(combinedText);
       if (intent !== "phone_number" && intent !== "negative" && intent !== "thanks") {
         await sleep(1500);
         await sendWA(senderId, followUp);

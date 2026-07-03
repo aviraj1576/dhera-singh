@@ -14,15 +14,20 @@ export async function recalculateAllProductPrices(): Promise<{
     .eq("key", lockKey)
     .maybeSingle();
 
-  if (existingLock?.value === "locked") {
-    console.log("⏭️ Price recalculation already running — skipping");
-    return { updated: 0, skipped: 0, errors: 0 };
+  // Lock with timeout — if lock is older than 30s, it's stale (crashed function)
+  if (existingLock?.value && existingLock.value.startsWith("locked:")) {
+    const lockTime = parseInt(existingLock.value.split(":")[1], 10);
+    if (!isNaN(lockTime) && Date.now() - lockTime < 30_000) {
+      console.log("⏭️ Price recalculation already running — skipping");
+      return { updated: 0, skipped: 0, errors: 0 };
+    }
+    console.log("⚠️ Stale lock detected (>30s) — overriding");
   }
 
-  // Set lock
+  // Set lock with timestamp for timeout detection
   await supabaseAdmin
     .from("admin_config")
-    .upsert({ key: lockKey, value: "locked" });
+    .upsert({ key: lockKey, value: `locked:${Date.now()}` });
 
   let updated = 0;
   let skipped = 0;
@@ -100,6 +105,77 @@ export async function recalculateAllProductPrices(): Promise<{
     await supabaseAdmin
       .from("admin_config")
       .upsert({ key: lockKey, value: "unlocked" });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SINGLE PRODUCT PRICE — used after adding/updating a single product
+// More reliable than global recalc since it doesn't use locks
+// ─────────────────────────────────────────────────────────────────────────────
+export async function calculateSingleProductPrice(productId: string): Promise<number | null> {
+  try {
+    const { data: product, error: productError } = await supabaseAdmin
+      .from("products")
+      .select("id, purity, weight_grams, making_charges_percent, stone_value, diamond_value, polki_value, fixed_price")
+      .eq("product_id", productId)
+      .eq("is_available", true)
+      .maybeSingle();
+
+    if (productError || !product) {
+      console.error("calculateSingleProductPrice: product not found:", productError?.message);
+      return null;
+    }
+
+    // If fixed_price is set, no calculation needed
+    if (product.fixed_price != null && Number(product.fixed_price) > 0) {
+      return Number(product.fixed_price);
+    }
+
+    const purity = product.purity;
+    const weight = Number(product.weight_grams) || 0;
+    if (!purity || weight === 0) {
+      console.log(`⏭️ Cannot calculate price for ${productId}: missing purity or weight`);
+      return null;
+    }
+
+    // Fetch the rate for this purity
+    const { data: metalPrice } = await supabaseAdmin
+      .from("metal_prices")
+      .select("price_per_gram")
+      .eq("karat_label", purity)
+      .maybeSingle();
+
+    const ratePerGram = Number(metalPrice?.price_per_gram) || 0;
+    if (ratePerGram === 0) {
+      console.log(`⏭️ No metal price for ${purity} — cannot calculate`);
+      return null;
+    }
+
+    const makingPct = Number(product.making_charges_percent) || 0;
+    const stoneVal = Number(product.stone_value) || 0;
+    const diamondVal = Number(product.diamond_value) || 0;
+    const polkiVal = Number(product.polki_value) || 0;
+
+    const base = ratePerGram * weight;
+    const making = base * (makingPct / 100);
+    const calculatedPrice = Math.round(base + making + stoneVal + diamondVal + polkiVal);
+
+    // Update the product with the calculated price
+    const { error: updateError } = await supabaseAdmin
+      .from("products")
+      .update({ calculated_price: calculatedPrice, updated_at: new Date().toISOString() })
+      .eq("id", product.id);
+
+    if (updateError) {
+      console.error("calculateSingleProductPrice update error:", updateError.message);
+      return null;
+    }
+
+    console.log(`✅ Price calculated for ${productId}: ₹${calculatedPrice.toLocaleString("en-IN")}`);
+    return calculatedPrice;
+  } catch (e) {
+    console.error("calculateSingleProductPrice exception:", e);
+    return null;
   }
 }
 

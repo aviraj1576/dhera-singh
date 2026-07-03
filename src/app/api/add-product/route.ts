@@ -1,7 +1,7 @@
 // src/app/api/add-product/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { recalculateAllProductPrices } from "@/lib/price-calculator";
+import { calculateSingleProductPrice } from "@/lib/price-calculator";
 import { requireAdminKey } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
@@ -55,8 +55,9 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error;
 
+        // Calculate price for this specific product (no lock, no global recalc)
         if (!fixed_price) {
-            await recalculateAllProductPrices();
+            await calculateSingleProductPrice(record.product_id);
         }
 
         return NextResponse.json({ success: true, product: data });
