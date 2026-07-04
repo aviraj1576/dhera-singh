@@ -120,7 +120,7 @@ export async function calculateSingleProductPrice(productId: string): Promise<nu
     const { data: product, error: productError } = await supabaseAdmin
       .from("products")
       .select("id, purity, weight_grams, making_charges_percent, stone_value, diamond_value, polki_value, fixed_price")
-      .eq("product_id", productId)
+      .eq("id", productId)
       .eq("is_available", true)
       .maybeSingle();
 

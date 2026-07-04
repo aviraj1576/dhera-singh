@@ -35,7 +35,7 @@ export type Intent =
   | "price"
   | "purity"
   | "weight"
-  | "details"      // NEW — price + weight + purity all at once
+  | "details"
   | "image"
   | "phone_number"
   | "greeting"
@@ -64,7 +64,7 @@ export function detectIntent(raw: string): Intent {
   // Negative / thanks
   if (/^(no|nahi|nope|nah|no thanks|theek hai|thik hai|ok|okay|👍|🙏)$/.test(msg))
     return "negative";
-  if (/^(thanks|thank you|shukriya|bahut shukriya|dhanyavaad|ty|thnx)$/.test(msg))
+  if (/^(thanks|thank you|shukriya|bahut shukriya|dhanyavaad|dhanwaad|ty|thnx)$/.test(msg))
     return "thanks";
 
   // Greeting
@@ -75,33 +75,33 @@ export function detectIntent(raw: string): Intent {
   if (/\b(screenshot|screen shot|ss|pic|photo|image|img)\b/.test(msg))
     return "image";
 
-  // Details — NEW: customer wants everything at once
+  // Details — customer wants everything at once
   if (
     /\b(details|detail|sab kuch|poori|poora|full details|full info|sab batao|sab kuch batao|all details|complete details|puri jankari|puri detail)\b/.test(msg) ||
     // Multiple intents in one message = details
     (
       /\b(price|pp|kimat|rate)\b/.test(msg) &&
-      /\b(weight|gram|wajan)\b/.test(msg)
+      /\b(weight|gram|wajan|vajan)\b/.test(msg)
     ) ||
     (
       /\b(price|pp|kimat|rate)\b/.test(msg) &&
       /\b(stuff|purity|karat)\b/.test(msg)
     ) ||
     (
-      /\b(weight|gram|wajan)\b/.test(msg) &&
+      /\b(weight|gram|wajan|vajan)\b/.test(msg) &&
       /\b(stuff|purity|karat)\b/.test(msg)
     )
   ) return "details";
 
   // Weight
-  if (/\b(weight|wajan|gram|gm|kitna gram|weight kitna|wajan kitna)\b/.test(msg))
+  if (/\b(weight|wajan|vajan|gram|gm|kitna gram|weight kitna|wajan kitna)\b/.test(msg))
     return "weight";
 
   // Purity
-  if (/\b(stuff|purity|karat|18k|22k|24k|14k|16k|kitna sona|kacha|pakka|hallmark)\b/.test(msg))
+  if (/\b(stuff|purity|karat|carat|18k|22k|24k|14k|16k|kitna sona|kacha|pakka|hallmark)\b/.test(msg))
     return "purity";
 
-  // Price
+  // Price — most common intent, checked last among product queries
   if (msg === "p") return "price";
   if (/^pp$/.test(msg) || /\bpp\b/.test(msg)) return "price";
   if (
@@ -119,25 +119,25 @@ export function detectAllIntents(raw: string): Set<Intent> {
   const found = new Set<Intent>();
   const msg = raw.toLowerCase();
 
-  if (/\b(price|pp|kimat|rate|how much|bhaav|cost|daam|rupee|₹)\b/.test(msg) || /\bpp\b/.test(msg) || msg.includes(" p ") || msg === "p")
+  if (/\b(price|pp|kimat|rate|how much|bhaav|cost|daam|rupee|₹|prise|prce|mull|bhav|dam|amount)\b/.test(msg) || /\bpp\b/.test(msg) || msg === "p")
     found.add("price");
 
-  if (/\b(weight|wajan|gram|gm|kitna gram)\b/.test(msg))
+  if (/\b(weight|wajan|vajan|gram|gm|kitna gram)\b/.test(msg))
     found.add("weight");
 
-  if (/\b(stuff|purity|karat|18k|22k|24k|14k|16k|kitna sona)\b/.test(msg))
+  if (/\b(stuff|purity|karat|carat|18k|22k|24k|14k|16k|kitna sona|hallmark|kacha|pakka)\b/.test(msg))
     found.add("purity");
 
-  if (/\b(details|sab kuch|full details|poori|poora|sab batao)\b/.test(msg))
+  if (/\b(details|sab kuch|full details|poori|poora|sab batao|puri jankari|complete details|all details)\b/.test(msg))
     found.add("details");
 
-  if (/^(hi|hello|hey|ssa|namaste|hnji)\b/.test(msg))
+  if (/\b(hi|hello|hey|ssa|sat sri akal|namaste|hnji|waheguru)\b/.test(msg))
     found.add("greeting");
 
-  if (/\b(screenshot|ss|pic|photo)\b/.test(msg))
+  if (/\b(screenshot|ss|pic|photo|image)\b/.test(msg))
     found.add("image");
 
-  // If both price+weight or price+purity or all three → upgrade to details
+  // If 2+ product intents → upgrade to "details"
   const hasPrice = found.has("price");
   const hasWeight = found.has("weight");
   const hasPurity = found.has("purity");
@@ -160,11 +160,11 @@ export function extractLinkFromMessage(text: string): string | undefined {
     /https?:\/\/(www\.|m\.)?inst(?:agram\.com|agr\.am)\/(?:p|reel|tv|stories)\/([A-Za-z0-9_-]+)\/?/i;
   const match = text.match(regex);
   if (!match?.[2]) return undefined;
-  return `https://www.instagram.com/p/${match[2]}/`;
+  return `https://www.instagram.com/reel/${match[2]}/`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// URL NORMALISATION
+// URL NORMALISATION — generates all possible URL variants for DB lookup
 // ─────────────────────────────────────────────────────────────────────────────
 export function normaliseLink(url: string): string[] {
   if (!url) return [];
@@ -237,7 +237,7 @@ const R = {
   greeting: "Sat Shri Akal Ji 🙏 Welcome to Dhera Singh Jewellers! Please share the reel or post you're interested in and we'll help right away.",
   negative: "No problem at all — feel free to reach out anytime!",
   thanks: "Our pleasure! Feel free to ask anytime 🙏",
-  phoneReceived: "Dhanwaad! Our team will reach out to you very shortly.",
+  phoneReceived: "Dhanwaad Ji! 🙏 Our team will reach out to you very shortly.",
   notFound: "Sat Shri Akal Ji 🙏 Our team will check and get back to you on this piece shortly!",
 } as const;
 
@@ -297,79 +297,7 @@ function buildProductReply(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MESSAGE BUFFER — collect rapid messages from same sender
-// ─────────────────────────────────────────────────────────────────────────────
-const BUFFER_WAIT_MS = 3000; // wait 3 seconds for more messages
-
-export async function bufferAndProcess(
-  senderId: string,
-  platform: string,
-  message: string,
-  resolvedLink: string | undefined,
-  processFn: (combined: string, link: string | undefined) => Promise<void>
-): Promise<void> {
-  // Store this message in the buffer
-  const { error: insertError } = await supabaseAdmin.from("message_buffer").insert({
-    sender_id: senderId,
-    platform,
-    message,
-    resolved_link: resolvedLink ?? null,
-  });
-  if (insertError) {
-    console.error("Buffer insert error:", insertError.message);
-  }
-
-  // Wait for more messages to arrive
-  await sleep(BUFFER_WAIT_MS);
-
-  // Fetch ALL buffered messages from this sender in last 10 seconds
-  const windowStart = new Date(Date.now() - 10_000).toISOString();
-  const { data: buffered, error } = await supabaseAdmin
-    .from("message_buffer")
-    .select("id, message, resolved_link, created_at")
-    .eq("sender_id", senderId)
-    .eq("platform", platform)
-    .gte("created_at", windowStart)
-    .order("created_at", { ascending: true });
-
-  if (error || !buffered?.length) return;
-
-  // Check if WE are the first message (oldest ID)
-  // Only the first message in the burst should trigger processing
-  // Later messages in the burst will find the buffer already cleared
-  const firstMessage = buffered[0];
-
-  // Use the message text to check if this is still the trigger
-  if (firstMessage.message !== message) {
-    console.log("⏭️ Not the first in burst — another message will handle this");
-    return;
-  }
-
-  // We are the trigger — combine all messages and clear buffer
-  const combinedText = buffered.map((b) => b.message).join(" ").trim();
-  const combinedLink =
-    buffered.find((b) => b.resolved_link)?.resolved_link ?? undefined;
-
-  // Clear all buffered messages for this sender
-  const ids = buffered.map((b) => b.id);
-  const { error: deleteError } = await supabaseAdmin
-    .from("message_buffer")
-    .delete()
-    .in("id", ids);
-  if (deleteError) {
-    console.error("Buffer clear error:", deleteError.message);
-  }
-
-  console.log(
-    `📦 Burst: ${buffered.length} messages merged → "${combinedText.slice(0, 100)}"`
-  );
-
-  // Process combined message
-  await processFn(combinedText, combinedLink ?? resolvedLink);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN AGENT
+// MAIN AGENT — takes user message + optional link, returns structured reply
 // ─────────────────────────────────────────────────────────────────────────────
 export async function runJewelleryAgent(input: AgentInput): Promise<AgentOutput> {
   const startTime = Date.now();
@@ -458,7 +386,6 @@ export async function runJewelleryAgent(input: AgentInput): Promise<AgentOutput>
 
     return {
       reply,
-      // Only send phone followUp when AI answered successfully
       followUp: needsHuman ? undefined : R.askForPhone,
       needsHuman,
       latencyMs: Date.now() - startTime,
@@ -475,7 +402,7 @@ export async function runJewelleryAgent(input: AgentInput): Promise<AgentOutput>
     return { reply: R.greeting, needsHuman: false, latencyMs: Date.now() - startTime };
   }
 
-  // Fetch company context
+  // Fetch company context from the about/company_info table
   let companyContext = "";
   try {
     const { data } = await supabaseAdmin
@@ -544,8 +471,4 @@ ${companyContext}`,
     needsHuman,
     latencyMs: Date.now() - startTime,
   };
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
