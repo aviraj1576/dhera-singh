@@ -241,57 +241,22 @@ const R = {
   notFound: "Sat Shri Akal Ji 🙏 Our team will check and get back to you on this piece shortly!",
 } as const;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BUILD PRODUCT REPLY — for a given set of intents and a product
-// ─────────────────────────────────────────────────────────────────────────────
 function buildProductReply(
   product: Record<string, unknown>,
   intents: Set<Intent>
 ): { reply: string; needsHuman: boolean } {
-  const name = product.name as string;
-  const lines: string[] = [`Sat Shri Akal Ji 🙏\n*${name}*`];
-  let anyMissing = false;
+  const priceStr = safeFormatPrice(product as { fixed_price: number | null; calculated_price: number | null });
 
-  const wantsPrice = intents.has("price") || intents.has("details");
-  const wantsWeight = intents.has("weight") || intents.has("details");
-  const wantsPurity = intents.has("purity") || intents.has("details");
-
-  if (wantsPrice) {
-    const priceStr = safeFormatPrice(product as { fixed_price: number | null; calculated_price: number | null });
-    if (priceStr) {
-      lines.push(`Price: ${priceStr}`);
-    } else {
-      anyMissing = true;
-    }
+  if (priceStr) {
+    return {
+      reply: `Sat Shri Akal Ji 🙏\nPrice: ${priceStr}`,
+      needsHuman: false,
+    };
   }
 
-  if (wantsPurity) {
-    if (product.purity) {
-      lines.push(`Purity: ${product.purity}`);
-    } else {
-      anyMissing = true;
-    }
-  }
-
-  if (wantsWeight) {
-    if (product.weight_grams) {
-      lines.push(`Weight: ${product.weight_grams}g`);
-    } else {
-      anyMissing = true;
-    }
-  }
-
-  // If we found at least one field, reply with what we have
-  if (lines.length > 1) {
-    if (anyMissing) {
-      lines.push("(Our team will confirm the remaining details shortly)");
-    }
-    return { reply: lines.join("\n"), needsHuman: anyMissing };
-  }
-
-  // Nothing found at all
+  // If price is missing
   return {
-    reply: `Sat Shri Akal Ji 🙏 Let me confirm the details for *${name}* — our team will reply shortly!`,
+    reply: "Sat Shri Akal Ji 🙏 Let me confirm the details — our team will reply shortly!",
     needsHuman: true,
   };
 }

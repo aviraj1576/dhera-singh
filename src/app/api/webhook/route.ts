@@ -199,7 +199,7 @@ async function processEvent(body: Record<string, unknown>) {
   if (body.object === "instagram") {
     await handleInstagram(body);
   } else if (body.object === "whatsapp_business_account") {
-    await handleWhatsApp(body);
+    // await handleWhatsApp(body);
   } else {
     console.log(`⏭️ Unknown object type: ${body.object}`);
   }
@@ -219,11 +219,13 @@ async function handleInstagram(body: Record<string, unknown>) {
     if (messaging.length > 0) {
       console.log(`📩 ${messaging.length} DM/standby event(s) received`);
     }
+    /*
     for (const event of messaging) {
       await handleInstagramDM(event).catch((e) =>
         console.error("❌ DM handler crashed:", e)
       );
     }
+    */
 
     // ── Comments come under entry.changes[field=comments] ──────────────────
     const changes = (entry.changes as Record<string, unknown>[]) ?? [];
