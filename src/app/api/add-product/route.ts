@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
         // Calculate price for this specific product (no lock, no global recalc)
         if (!fixed_price) {
-            await calculateSingleProductPrice(record.product_id);
+            await calculateSingleProductPrice(data.id);
         }
 
         return NextResponse.json({ success: true, product: data });
