@@ -1,103 +1,191 @@
 // src/app/privacy/page.tsx
-import React from "react";
+"use client";
 
-export const metadata = {
-  title: "Privacy Policy | Dhera Singh Jewellers",
-  description: "Privacy Policy and Data Deletion Instructions for Dhera Singh Jewellers Customer Assistant.",
-};
+import { Shield, Mail, Phone, Clock, Building, Gavel, Globe, Lock, FileText, AlertCircle } from "lucide-react";
 
-export default function PrivacyPolicy() {
+export default function PrivacyPage() {
+  const shop = {
+    name: "Dhera Singh Jewellers",
+    address: "Adalat Bazaar, near AC Market, Patiala, Punjab 147004",
+    phone: "9876297973",
+    email: "dherasinghjewellers@gmail.com",
+    hours: "10:00 AM – 9:00 PM (Closed on National Holidays)",
+    grievanceOfficer: "Angad Singh",
+  };
+
+  const lastUpdated = "21 October 2026";
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 sm:p-12 relative overflow-hidden font-sans">
-      {/* Background ambient glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-amber-500/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-yellow-500/10 blur-[120px] pointer-events-none" />
-
-      <main className="relative z-10 w-full max-w-3xl bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 sm:p-12 shadow-2xl">
+    <div className="min-h-screen bg-cream py-12 px-4">
+      <div className="max-w-4xl mx-auto bg-white rounded-3xl border border-[#EADDCD] shadow-[0_15px_50px_rgba(0,0,0,0.03)] p-8 md:p-12 animate-in">
         {/* Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-2xl font-bold mb-4">
-            DS
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center justify-center gap-3 mb-6">
+            <span className="h-[1px] w-16 bg-gradient-to-r from-transparent to-[#D4AF37]/80" />
+            <span className="text-[#CFA052] font-semibold text-xs uppercase tracking-[0.3em]">Privacy Policy</span>
+            <span className="h-[1px] w-16 bg-gradient-to-l from-transparent to-[#D4AF37]/80" />
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-200 bg-clip-text text-transparent">
-            Privacy Policy
+          <h1 className="text-4xl md:text-5xl font-serif text-[#1A1A1A] tracking-wide mb-4">
+            {shop.name}
           </h1>
-          <p className="text-slate-400 mt-2 text-sm">
-            Last Updated: June 27, 2026
+          <p className="text-[#8A8A8A] font-light text-lg max-w-2xl mx-auto leading-relaxed">
+            Your privacy matters to us. This policy explains how we collect, use, and protect your information.
           </p>
+          <p className="text-sm text-[#CFA052] mt-4 font-medium">Last updated: {lastUpdated}</p>
         </div>
 
-        {/* Content Sections */}
-        <div className="space-y-8 text-slate-300 leading-relaxed text-sm sm:text-base">
-          <section className="border-b border-slate-800 pb-6">
-            <h2 className="text-lg font-semibold text-amber-300 mb-3">1. Introduction</h2>
-            <p>
-              At <strong>Dhera Singh Jewellers</strong>, we value your trust and are committed to protecting your personal data. This Privacy Policy describes how our automated messaging application handles your personal information when you interact with us via Instagram Direct Messages (DMs), comments, or WhatsApp.
-            </p>
-          </section>
-
-          <section className="border-b border-slate-800 pb-6">
-            <h2 className="text-lg font-semibold text-amber-300 mb-3">2. Data We Collect</h2>
-            <p className="mb-2">
-              When you send a message, comment on our posts, or contact us, we may collect:
-            </p>
-            <ul className="list-disc pl-5 space-y-2 text-slate-400">
-              <li>Your public social media handle, profile name, and platform identifier (e.g., Instagram User ID or WhatsApp phone number).</li>
-              <li>The text contents, links, or media attachments of your inquiries.</li>
-              <li>Optional contact details (such as phone numbers or email addresses) that you choose to share with us during conversations.</li>
+        {/* Sections */}
+        <div className="space-y-10 text-[#2A2A2A] leading-relaxed">
+          {/* 1. Data Controller */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Building className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">1. Data Controller</h2>
+            </div>
+            <p><strong>{shop.name}</strong> ("we", "us", "our") is the data controller for your personal information.</p>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li><strong>Address:</strong> {shop.address}</li>
+              <li><strong>Phone:</strong> {shop.phone}</li>
+              <li><strong>Email:</strong> {shop.email}</li>
+              <li><strong>Grievance Officer:</strong> {shop.grievanceOfficer} ({shop.email})</li>
             </ul>
           </section>
 
-          <section className="border-b border-slate-800 pb-6">
-            <h2 className="text-lg font-semibold text-amber-300 mb-3">3. How We Use Your Data</h2>
-            <p className="mb-2">
-              We process this information solely to:
-            </p>
-            <ul className="list-disc pl-5 space-y-2 text-slate-400">
-              <li>Automatically answer questions about product prices, weights, and purity.</li>
-              <li>Connect you with our human sales representatives for bespoke inquiries and custom orders.</li>
-              <li>Improve our customer service flow and catalog systems.</li>
+          {/* 2. Data Collected */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <FileText className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">2. Data We Collect</h2>
+            </div>
+            <p>We collect the following when you interact with our Instagram DM, comments, or ice breakers:</p>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li><strong>Instagram ID (IGSID):</strong> Unique identifier assigned by Meta</li>
+              <li><strong>Username:</strong> Your public Instagram handle</li>
+              <li><strong>Display Name:</strong> Your Instagram profile name (if you message us or tap an ice breaker)</li>
+              <li><strong>Messages:</strong> Text, images, links, and attachments you send</li>
+              <li><strong>Products Asked About:</strong> Reels/posts you comment on or share</li>
+              <li><strong>Name & Phone:</strong> Only if you voluntarily provide them during chat</li>
+              <li><strong>Metadata:</strong> Timestamps, message IDs, platform, conversation context</li>
             </ul>
-            <p className="mt-2 text-slate-400">
-              We do <strong>not</strong> sell, lease, or distribute your personal data to any third-party marketing companies.
-            </p>
           </section>
 
-          <section className="border-b border-slate-800 pb-6">
-            <h2 className="text-lg font-semibold text-amber-300 mb-3">4. Data Deletion Instructions (Meta Compliant)</h2>
-            <p className="mb-3">
-              We respect your rights to control your data. If you want us to remove all logs of your messages, comments, or contact details from our internal support databases:
-            </p>
-            <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 text-slate-400">
-              <p className="mb-2 font-medium text-slate-300">To request data deletion, simply:</p>
-              <ol className="list-decimal pl-5 space-y-1">
-                <li>Send an email to <span className="text-amber-400 font-mono">aviraj1576@gmail.com</span>.</li>
-                <li>State "Data Deletion Request" in the subject line.</li>
-                <li>Provide your platform handle (e.g., Instagram Username or WhatsApp phone number).</li>
-              </ol>
-              <p className="mt-3 text-xs italic text-slate-500">
-                We will permanently delete your records from our systems within 48 hours of receiving the request.
-              </p>
+          {/* 3. Purpose */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Mail className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">3. Purpose of Processing</h2>
+            </div>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li>Reply to your product enquiries (price, weight, purity, details)</li>
+              <li>Send jewellery prices calculated from live gold rates</li>
+              <li>Connect you with our human team for complex queries</li>
+              <li>Improve our automated assistant using AI (Anthropic Claude)</li>
+              <li>Contact you if you request a callback or share your number</li>
+              <li>Comply with legal obligations (DPDP Act 2023, Meta platform policies)</li>
+            </ul>
+          </section>
+
+          {/* 4. AI Processing */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Lock className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">4. AI Processing (Anthropic Claude)</h2>
+            </div>
+            <p className="mb-2">For general shop questions (location, hours, policies), we use Anthropic's Claude model.</p>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li>Your message is sent to Anthropic with a strict system prompt</li>
+              <li>We <strong>never</strong> send prices, weights, or purities to AI — those come from our database only</li>
+              <li>Phone numbers are <strong>redacted</strong> before any AI processing</li>
+              <li>Anthropic does not use your data to train their models (per their API policy)</li>
+            </ul>
+          </section>
+
+          {/* 5. Hosting & Sub-processors */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Globe className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">5. Hosting & Sub-processors</h2>
+            </div>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li><strong>Vercel:</strong> Application hosting (US/EU regions)</li>
+              <li><strong>Supabase (PostgreSQL):</strong> Database & authentication (US/EU regions)</li>
+              <li><strong>Anthropic:</strong> AI model inference (US)</li>
+              <li><strong>Meta (Instagram/WhatsApp):</strong> Message delivery platform</li>
+            </ul>
+          </section>
+
+          {/* 6. Retention */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Clock className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">6. Retention</h2>
+            </div>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li>Conversation logs: 12 months from last activity</li>
+              <li>Lead data (name, phone, interests): 12 months from last activity, or until you request deletion</li>
+              <li>Anonymised analytics: Indefinitely (no personal identifiers)</li>
+              <li>You can request immediate deletion by sending <strong>DELETE</strong> in chat</li>
+            </ul>
+          </section>
+
+          {/* 7. Your Rights (DPDP Act 2023) */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Gavel className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">7. Your Rights (Digital Personal Data Protection Act 2023)</h2>
+            </div>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li><strong>Access:</strong> Request a copy of your data</li>
+              <li><strong>Correction:</strong> Update inaccurate information</li>
+              <li><strong>Deletion:</strong> Send <strong>DELETE</strong> in chat or email us</li>
+              <li><strong>Grievance Redressal:</strong> Contact our Grievance Officer</li>
+              <li><strong>Withdraw Consent:</strong> Send <strong>STOP</strong> to stop marketing messages</li>
+            </ul>
+            <p className="mt-3 text-sm">We respond to all requests within 30 days as per DPDP Act 2023.</p>
+          </section>
+
+          {/* 8. Data Security */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Shield className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">8. Data Security</h2>
+            </div>
+            <ul className="list-disc list-inside space-y-2 mt-2 text-sm">
+              <li>All data encrypted in transit (TLS 1.2+) and at rest (AES-256)</li>
+              <li>Row Level Security on all database tables</li>
+              <li>Staff access via Supabase Auth with role-based permissions</li>
+              <li>No data sold to third parties — ever</li>
+              <li>Children under 18: We do not knowingly collect data from minors</li>
+            </ul>
+          </section>
+
+          {/* 9. Contact */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Phone className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">9. Contact Us</h2>
+            </div>
+            <div className="space-y-2 text-sm">
+              <p><strong>Dhera Singh Jewellers</strong></p>
+              <p>{shop.address}</p>
+              <p>📞 {shop.phone} &nbsp; | &nbsp; ✉️ {shop.email}</p>
+              <p>🕐 {shop.hours}</p>
+              <p className="mt-2"><strong>Grievance Officer:</strong> {shop.grievanceOfficer} — {shop.email}</p>
             </div>
           </section>
 
-          <section>
-            <h2 className="text-lg font-semibold text-amber-300 mb-3">5. Contact Us</h2>
-            <p>
-              For any questions regarding this Privacy Policy or our data practices, please contact us at:
-            </p>
-            <div className="mt-2 text-slate-400 font-mono text-xs sm:text-sm space-y-1">
-              <p>📍 Dhera Singh Jewellers, Punjab, India</p>
-              <p>✉️ aviraj1576@gmail.com</p>
+          {/* 10. Governing Law */}
+          <section className="border-l-4 border-[#CFA052] pl-6">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="text-[#CFA052] w-6 h-6" />
+              <h2 className="text-2xl font-serif text-[#1A1A1A]">10. Governing Law</h2>
             </div>
+            <p className="text-sm">
+              This policy is governed by the laws of India. Disputes are subject to the exclusive jurisdiction of courts in <strong>Patiala, Punjab</strong>.
+            </p>
           </section>
         </div>
-
-        {/* Footer */}
-        <div className="mt-12 pt-6 border-t border-slate-800 text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} Dhera Singh Jewellers. All rights reserved.
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

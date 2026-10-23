@@ -4,6 +4,8 @@
 import { useState, useEffect } from "react";
 import {
   Bot, User, Clock, BarChart3, Activity, CheckCircle2, ExternalLink,
+  AlertCircle, ChevronDown, ChevronRight, MoreVertical, Trash2, Edit2, Eye,
+  X, CheckCircle2 as CheckCircle2Icon, Shield, AlertTriangle
 } from "lucide-react";
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
@@ -22,6 +24,10 @@ interface Conversation {
   human_reply: string | null;
   response_latency_ms: number | null;
   created_at: string;
+  message_id?: string;
+  context?: string;
+  error_info?: string;
+  handled_by?: string;
 }
 
 interface DashboardStats {
@@ -31,6 +37,13 @@ interface DashboardStats {
   recent: Conversation[];
   volumeData: { day: string; queries: number }[];
   metalPrices: { karat_label: string; price_per_gram: number; updated_at: string }[];
+}
+
+interface WindowState {
+  canSend: boolean;
+  window: "open" | "human_agent" | "closed";
+  hoursRemaining: number;
+  lastUserMessageAt: string | null;
 }
 
 // ─── Custom Tooltip for Recharts ──────────────────────────────────────────────
@@ -86,6 +99,29 @@ function StatCard({
   );
 }
 
+// ─── Window State Badge ───────────────────────────────────────────────────────
+function WindowStateBadge({ state }: { state: WindowState }) {
+  if (state.window === "open") {
+    return (
+      <span className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-green-700 bg-green-50 border border-green-200 rounded-full font-bold">
+        <CheckCircle2Icon size={10} /> Open ({state.hoursRemaining.toFixed(1)}h left)
+      </span>
+    );
+  }
+  if (state.window === "human_agent") {
+    return (
+      <span className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-amber-700 bg-amber-50 border border-amber-200 rounded-full font-bold">
+        <Shield size={10} /> Human Agent ({state.hoursRemaining.toFixed(1)}h left)
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-red-700 bg-red-50 border border-red-200 rounded-full font-bold">
+      <AlertCircle size={10} /> Closed
+    </span>
+  );
+}
+
 // ─── Human Reply Modal ────────────────────────────────────────────────────────
 function ReplyModal({
   conversation,
@@ -99,18 +135,38 @@ function ReplyModal({
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [windowState, setWindowState] = useState<WindowState | null>(null);
+  const [checkingWindow, setCheckingWindow] = useState(true);
+
+  useEffect(() => {
+    // Fetch window state when modal opens
+    const fetchWindow = async () => {
+      try {
+        const res = await fetch(`/api/human-reply?sender_id=${conversation.sender_id}`, {
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (data.success) setWindowState(data.window_state);
+      } catch (e) {
+        console.error("Failed to fetch window state:", e);
+      } finally {
+        setCheckingWindow(false);
+      }
+    };
+    fetchWindow();
+  }, [conversation.sender_id]);
 
   const handleSend = async () => {
     if (!text.trim()) return;
+    if (windowState?.window === "closed") return;
+    
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/human-reply", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
-        },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: conversation.id,
           reply_text: text.trim(),
@@ -127,19 +183,47 @@ function ReplyModal({
     }
   };
 
+  if (checkingWindow) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl">
+          <div className="flex items-center justify-center h-20">
+            <div className="w-8 h-8 rounded-full border-2 border-[#CFA052] border-t-transparent animate-spin" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const canSend = windowState?.window !== "closed";
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl">
-        <h3 className="font-serif text-xl text-[#1A1A1A] mb-2">Reply to Customer</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-serif text-xl text-[#1A1A1A]">Reply to Customer</h3>
+          {windowState && <WindowStateBadge state={windowState} />}
+        </div>
+
         <p className="text-[#8A8A8A] text-sm mb-6 italic">"{conversation.human_message}"</p>
+
+        {!canSend && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+            <AlertCircle size={14} className="inline mr-1" /> {"Messaging window closed (>7 days). Cannot send reply."}
+          </div>
+        )}
+
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={4}
           placeholder="Type your reply..."
-          className="w-full border border-[#EADDCD] rounded-xl p-4 text-sm focus:outline-none focus:border-[#CFA052] resize-none mb-4"
+          disabled={!canSend}
+          className="w-full border border-[#EADDCD] rounded-xl p-4 text-sm focus:outline-none focus:border-[#CFA052] resize-none mb-4 disabled:bg-[#F8F7F5] disabled:text-[#D1D1D1]"
         />
+
         {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+
         <div className="flex gap-3 justify-end">
           <button
             onClick={onClose}
@@ -149,7 +233,7 @@ function ReplyModal({
           </button>
           <button
             onClick={handleSend}
-            disabled={loading || !text.trim()}
+            disabled={loading || !text.trim() || !canSend}
             className="px-5 py-2 text-sm text-white bg-[#2A2A2A] rounded-full hover:bg-[#CFA052] transition-colors disabled:opacity-50"
           >
             {loading ? "Sending..." : "Send Reply"}
@@ -169,9 +253,7 @@ export default function DashboardTab() {
   const loadStats = async () => {
     try {
       const res = await fetch("/api/dashboard-stats", {
-        headers: {
-          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
-        },
+        credentials: "include",
       });
       const data = await res.json();
       setStats(data);
@@ -421,6 +503,7 @@ export default function DashboardTab() {
             ))}
           </div>
         )}
+
       </div>
 
       {/* Reply modal */}

@@ -7,8 +7,9 @@ import DashboardTab  from "@/components/DashboardTab";
 import AutomationTab from "@/components/AutomationTab";
 import UpdatePriceTab from "@/components/UpdatePriceTab";
 import TipsTab       from "@/components/TipsTab";
+import LeadsTab      from "@/components/LeadsTab";
 
-const TABS = ["Dashboard", "Automation", "Update price", "tips"] as const;
+const TABS = ["Dashboard", "Automation", "Update price", "Leads", "tips"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -78,6 +79,7 @@ export default function App() {
         {activeTab === "Dashboard"    && <DashboardTab />}
         {activeTab === "Automation"   && <AutomationTab />}
         {activeTab === "Update price" && <UpdatePriceTab />}
+        {activeTab === "Leads"        && <LeadsTab />}
         {activeTab === "tips"         && <TipsTab />}
       </main>
 

@@ -18,9 +18,7 @@ export default function UpdatePriceTab() {
     const load = async () => {
       try {
         const res = await fetch("/api/dashboard-stats", {
-          headers: {
-            "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
-          },
+          credentials: "include",
         });
         const data = await res.json();
         if (data.metalPrices?.length) {
@@ -61,9 +59,9 @@ export default function UpdatePriceTab() {
 
       const res = await fetch("/api/update-prices", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-key": process.env.NEXT_PUBLIC_ADMIN_KEY ?? "",
         },
         body: JSON.stringify({ prices: priceMap }),
       });
