@@ -2,8 +2,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-export function createSupabaseServerClient() {
-  const cookieStore = cookies();
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,7 +27,7 @@ export function createSupabaseServerClient() {
   );
 }
 
-export function createSupabaseRouteClient(cookieHeader?: string) {
+export async function createSupabaseRouteClient(cookieHeader?: string) {
   // For middleware: parse cookies from request header
   // For API routes: use cookies() from next/headers
   if (cookieHeader) {
@@ -54,7 +54,7 @@ export function createSupabaseRouteClient(cookieHeader?: string) {
   }
 
   // Regular server/client usage
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -79,14 +79,14 @@ export function createSupabaseRouteClient(cookieHeader?: string) {
 
 // Use getUser() for security - validates with Auth server
 export async function getUser() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error) return null;
   return user;
 }
 
 export async function getSession() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
   const { data: { session } } = await supabase.auth.getSession();
   return session;
 }

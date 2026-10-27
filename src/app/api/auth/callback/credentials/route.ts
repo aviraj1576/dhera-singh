@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   const { email, password } = await request.json();
-  const supabase = await createSupabaseRouteClient(request);
+  const cookieHeader = request.headers.get("cookie") ?? undefined;
+  const supabase = await createSupabaseRouteClient(cookieHeader);
 
   // Try sign in first
   const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({
