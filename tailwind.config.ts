@@ -1,5 +1,4 @@
 // tailwind.config.ts
-// tailwind.config.ts - REPLACE ENTIRE FILE
 import type { Config } from "tailwindcss";
 
 const config: Config = {

@@ -20,7 +20,9 @@ export async function requireStaff(
   request: NextRequest,
   allowedRoles?: StaffRole[]
 ): Promise<StaffUser | NextResponse> {
-  const supabase = await createSupabaseRouteClient(request);
+  // Create Supabase client with request cookies
+  const cookieHeader = request.headers.get("cookie");
+  const supabase = createSupabaseRouteClient(cookieHeader);
 
   // Use getUser() for security - validates with Auth server
   const { data: { user }, error: userError } = await supabase.auth.getUser();

@@ -13,7 +13,13 @@ function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(errorParam === "unauthorized" ? "Please sign in to continue" : "");
+  const [error, setError] = useState(
+    errorParam === "unauthorized" 
+      ? "Invalid credentials or unauthorized access" 
+      : errorParam === "session_expired" 
+        ? "Session expired. Please sign in again." 
+        : ""
+  );
   const [loading, setLoading] = useState(false);
 
   const supabase = createBrowserClient(
@@ -26,7 +32,7 @@ function LoginForm() {
     setError("");
     setLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { error: signInError, data } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -37,12 +43,27 @@ function LoginForm() {
       return;
     }
 
+    // Wait for session to be established and cookies to be set
+    let retries = 0;
+    while (retries < 5) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) break;
+      await new Promise(r => setTimeout(r, 300));
+      retries++;
+    }
+
+    // Navigate to redirect URL
     router.push(redirect);
     router.refresh();
   }
 
   async function handleMagicLink(e: React.FormEvent) {
     e.preventDefault();
+    if (!email) {
+      setError("Please enter your email first");
+      return;
+    }
+    
     setError("");
     setLoading(true);
 
@@ -56,7 +77,7 @@ function LoginForm() {
     if (error) {
       setError(error.message);
     } else {
-      setError("Magic link sent! Check your email.");
+      setError("Magic link sent! Check your email and click the link to sign in.");
     }
     setLoading(false);
   }
