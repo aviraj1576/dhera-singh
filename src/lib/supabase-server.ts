@@ -20,9 +20,7 @@ export async function createSupabaseServerClient() {
               cookieStore.set(name, value, options)
             );
           } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            // Server Component - ignore
           }
         },
       },
@@ -30,7 +28,6 @@ export async function createSupabaseServerClient() {
   );
 }
 
-// For use in Route Handlers where we need to mutate cookies
 export async function createSupabaseRouteClient(request?: Request) {
   const cookieStore = await cookies();
 
@@ -52,20 +49,17 @@ export async function createSupabaseRouteClient(request?: Request) {
   );
 }
 
-// Get user session (for server components and route handlers)
-export async function getSession() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session;
-}
-
-// Get user (for server components and route handlers)
+// Use getUser() for security - validates with Auth server
 export async function getUser() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) return null;
   return user;
+}
+
+// Keep getSession for backwards compatibility but prefer getUser
+export async function getSession() {
+  const supabase = await createSupabaseServerClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
 }

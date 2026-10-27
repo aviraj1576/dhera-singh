@@ -14,6 +14,7 @@ export interface StaffUser {
 /**
  * Verify staff session from cookies (for dashboard pages and API routes)
  * Returns staff user object on success, or NextResponse with 401/403 on failure
+ * Uses getUser() for security - validates with Auth server
  */
 export async function requireStaff(
   request: NextRequest,
@@ -21,18 +22,17 @@ export async function requireStaff(
 ): Promise<StaffUser | NextResponse> {
   const supabase = await createSupabaseRouteClient(request);
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // Use getUser() for security - validates with Auth server
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (userError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { data: staff, error } = await supabase
     .from("staff_profiles")
     .select("role, active, display_name")
-    .eq("user_id", session.user.id)
+    .eq("user_id", user.id)
     .single();
 
   if (error || !staff || !staff.active) {
@@ -44,8 +44,8 @@ export async function requireStaff(
   }
 
   return {
-    id: session.user.id,
-    email: session.user.email!,
+    id: user.id,
+    email: user.email!,
     role: staff.role,
     displayName: staff.display_name,
   };
