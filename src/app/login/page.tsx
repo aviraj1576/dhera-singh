@@ -3,7 +3,6 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
 
 function LoginForm() {
   const router = useRouter();
@@ -11,7 +10,7 @@ function LoginForm() {
   const redirect = searchParams.get("redirect") || "/";
   const errorParam = searchParams.get("error");
 
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(
     errorParam === "unauthorized" 
@@ -22,64 +21,33 @@ function LoginForm() {
   );
   const [loading, setLoading] = useState(false);
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    const { error: signInError, data } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Login failed");
+        setLoading(false);
+        return;
+      }
+
+      // Cookie is set by server, just redirect
+      router.push(redirect);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Wait for session to be established and cookies to be set
-    let retries = 0;
-    while (retries < 5) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) break;
-      await new Promise(r => setTimeout(r, 300));
-      retries++;
-    }
-
-    // Navigate to redirect URL
-    router.push(redirect);
-    router.refresh();
-  }
-
-  async function handleMagicLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email) {
-      setError("Please enter your email first");
-      return;
-    }
-    
-    setError("");
-    setLoading(true);
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/login`,
-      },
-    });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      setError("Magic link sent! Check your email and click the link to sign in.");
-    }
-    setLoading(false);
   }
 
   return (
@@ -128,15 +96,15 @@ function LoginForm() {
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
           <div>
             <label style={{ display: "block", fontSize: "0.875rem", fontWeight: "500", color: "#374151", marginBottom: "0.25rem" }}>
-              Email
+              Email / Username
             </label>
             <input
-              id="email"
-              type="email"
-              autoComplete="email"
+              id="username"
+              type="text"
+              autoComplete="username"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               style={{
                 width: "100%",
                 padding: "0.75rem 1rem",
@@ -201,28 +169,8 @@ function LoginForm() {
           </button>
         </form>
 
-        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
-          <button
-            type="button"
-            onClick={handleMagicLink}
-            disabled={loading || !email}
-            style={{
-              padding: "0.5rem 1rem",
-              backgroundColor: "transparent",
-              color: "#CFA052",
-              border: "1px solid #CFA052",
-              borderRadius: "0.5rem",
-              fontSize: "0.875rem",
-              cursor: loading || !email ? "not-allowed" : "pointer",
-              opacity: loading || !email ? 0.5 : 1,
-            }}
-          >
-            Send Magic Link Instead
-          </button>
-        </div>
-
         <p style={{ marginTop: "1.5rem", textAlign: "center", fontSize: "0.875rem", color: "#9CA3AF" }}>
-          No sign-up available. Contact admin for access.
+          Contact admin if you need access.
         </p>
       </div>
     </div>
