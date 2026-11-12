@@ -1,6 +1,7 @@
 // src/lib/auth-custom.ts
 import { supabaseAdmin } from "@/lib/supabase";
 import { SignJWT, jwtVerify } from "jose";
+import * as bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -28,27 +29,22 @@ export interface SessionPayload {
 }
 
 /**
- * Hash password using pgcrypto (same as SQL: crypt(password, gen_salt('bf')))
+ * Hash password using bcryptjs (matches PostgreSQL bcrypt)
  */
 export async function hashPassword(password: string): Promise<string> {
-  const { data, error } = await supabaseAdmin.rpc("crypt", {
-    password,
-    salt: await supabaseAdmin.rpc("gen_salt", { algorithm: "bf" })
-  });
-  if (error) throw new Error("Failed to hash password: " + error.message);
-  return data;
+  return bcrypt.hash(password, 10);
 }
 
 /**
- * Verify password against hash (uses pgcrypto's crypt function)
+ * Verify password against hash using bcryptjs (reliable, no RPC issues)
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.rpc("crypt", {
-    password,
-    salt: hash
-  });
-  if (error) return false;
-  return data === hash;
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch (e) {
+    console.error("verifyPassword error:", e);
+    return false;
+  }
 }
 
 /**
