@@ -41,6 +41,8 @@ CREATE POLICY "service_role_all" ON staff_sessions FOR ALL USING (auth.role() = 
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ADD a new staff member
+--   EASIEST: sign in as an admin > "Staff" tab > Add staff member. It does both
+--   steps below for you. The SQL is the manual alternative.
 --   Step 1: Supabase Dashboard > Authentication > Users > Add user > Create new user
 --           (enter their email, any password, tick "Auto Confirm User").
 --   Step 2: run this, using the SAME email as step 1:

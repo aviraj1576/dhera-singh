@@ -10,9 +10,9 @@ Next.js 16.2.9 (App Router) + React 19 admin dashboard and webhook handler for I
 - **No `npm test` exists.** No test runner or test files are configured.
 
 ## Environment
-- Create `.env.local` at the root (`.env*` is gitignored). Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `INSTAGRAM_PAGE_ID`, `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_VERIFY_TOKEN`, `WHATSAPP_VERIFY_TOKEN`.
+- Create `.env.local` at the root (`.env*` is gitignored). Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `INSTAGRAM_PAGE_ID`, `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_VERIFY_TOKEN`, `WHATSAPP_VERIFY_TOKEN`, `SESSION_SECRET` (signs staff login cookies; `auth-custom.ts` has a hardcoded dev fallback, so it **must** be set in production).
 - `.env.local` already exists locally with real secrets. **Never commit, print, or log tokens/keys.** Show only the first 4 characters when diagnosing. Never put secrets in `NEXT_PUBLIC_*` variables.
-- Missing `ADMIN_SECRET_KEY` makes admin routes return 500 (`src/lib/auth.ts`).
+- `ADMIN_SECRET_KEY` is only for the legacy cron path (`requireAdminKey()` / `requireCronOrAdmin()`, header `x-admin-key`); if unset those return 500. Dashboard/admin API routes use staff sessions instead (see Staff auth below).
 
 ## Structure & entrypoints
 - `src/app/page.tsx` — dashboard (tabs: `AutomationTab`, `DashboardTab`, `TipsTab`, `UpdatePriceTab` in `src/components/`)
@@ -22,16 +22,21 @@ Next.js 16.2.9 (App Router) + React 19 admin dashboard and webhook handler for I
 - `src/lib/supabase.ts` — public + service-role (`supabaseAdmin`) Supabase clients
 - `src/lib/anthropic.ts` — Claude intent detection and replies (`runJewelleryAgent`)
 - `src/lib/price-calculator.ts` — jewellery price math
-- `src/lib/auth.ts` — `requireAdminKey()`: checks `x-admin-key` header or `admin_key` query param against `ADMIN_SECRET_KEY`
+- `src/lib/auth.ts` — `requireStaff(request, roles?)` guards API routes (verifies the `staff_session` cookie); also legacy `requireAdminKey()` / `requireCronOrAdmin()` for cron
+- `src/lib/auth-custom.ts` — `login()`, `verifySession()`, session cookie + `staff_sessions` storage, bcrypt helpers
+- `src/lib/login-rate-limit.ts` — brute-force limiter on `login_attempts` (fails open if the table is missing)
+- `src/proxy.ts` — redirects unauthenticated page requests to `/login`
+- `src/app/api/{auth/login, auth/logout, me, staff}/route.ts` — sign in/out, current user, admin-only staff list/add
+- `src/sql/` — one-off SQL to run in the Supabase SQL editor (`auth-schema.sql`, `login-attempts.sql`)
 - Path alias `@/*` → `./src/*`
 
 ## Critical quirks (verified in code)
 1. **Webhook signature check is bypassed.** `verifyMetaSignature` returns `true` even when invalid or `INSTAGRAM_APP_SECRET` is unset (logs "Bypassing for testing"). Do not rely on it.
 2. **DM handler is commented out.** In `webhook/route.ts`, `handleInstagramDM` is disabled; DMs are received but not processed.
 3. **Next.js 16 differs from older versions.** There is no `middleware.ts`; the bundled docs under `node_modules/next/dist/docs/` describe `proxy.ts` and the `after()` helper. Read them before adding middleware or background work.
-4. **Admin auth is a single shared key**, and it is also leaked as `NEXT_PUBLIC_ADMIN_KEY` in browser components (known issue — do not copy that pattern).
+4. **Staff auth (email + password).** `staff_profiles` has **no `id` or `email` column** — the key is `user_id` and the login email is `username` (stored lowercase). `user_id` has a FOREIGN KEY to Supabase `auth.users(id)`, so adding staff = create an Auth user, then a `staff_profiles` row with a bcrypt `password_hash`; admins do this from the dashboard **Staff** tab (`POST /api/staff`). Login uses `staff_profiles.password_hash` only — the Auth user's own password is unused. Roles: `admin` | `agent`. Don't reintroduce Supabase Auth cookie checks (`@supabase/ssr` is no longer used by any code). Never commit real passwords, including in SQL comments.
 5. Graph API base is hard-coded `https://graph.facebook.com/v25.0`; tokens travel in URL query strings.
-6. Tables: `products`, `metal_prices`, `company_info`, `conversations`, `processed_events`, `sender_rate_limits`, `message_buffer`, `recent_replies`, `admin_config`. RLS is on everywhere; `metal_prices` allows anonymous read. Writes use the service-role client.
+6. Tables: `products`, `metal_prices`, `company_info`, `conversations`, `processed_events`, `sender_rate_limits`, `message_buffer`, `recent_replies`, `admin_config`, `staff_profiles`, `staff_sessions`, `login_attempts`. RLS is on everywhere; `metal_prices` allows anonymous read. Writes use the service-role client.
 
 ## Verification
 - `npm run dev`, open http://localhost:3000. Test the webhook handshake with `GET /api/webhook?hub.mode=subscribe&hub.verify_token=<token>&hub.challenge=<challenge>`.
