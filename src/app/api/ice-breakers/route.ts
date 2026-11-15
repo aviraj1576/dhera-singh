@@ -1,6 +1,8 @@
 // src/app/api/ice-breakers/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
+import { supabaseAdmin } from "@/lib/supabase";
+import { ICE_BREAKERS_HASH_KEY } from "@/lib/webhook/ice-breakers-store";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v25.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -61,6 +63,13 @@ export async function DELETE(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // The "last synced" hash no longer describes anything live. Best effort: the delete already succeeded.
+    const { error: hashError } = await supabaseAdmin
+      .from("admin_config")
+      .delete()
+      .eq("key", ICE_BREAKERS_HASH_KEY);
+    if (hashError) console.warn("Could not clear ice_breakers_hash:", hashError.message);
 
     return NextResponse.json({ success: true, message: "Ice breakers deleted" });
   } catch (err: unknown) {

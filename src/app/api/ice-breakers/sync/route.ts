@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { requireStaff } from "@/lib/auth";
 import { buildIceBreakersBody, getIceBreakersHash } from "@/lib/webhook/ice-breakers";
+import { loadIceBreakerQuestions, ICE_BREAKERS_HASH_KEY } from "@/lib/webhook/ice-breakers-store";
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v25.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -13,7 +14,9 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
 
   try {
-    const body = buildIceBreakersBody();
+    // Publish the saved wording (falls back to the defaults if nothing was edited).
+    const { questions } = await loadIceBreakerQuestions();
+    const body = buildIceBreakersBody(questions);
 
     // Send to Meta
     const syncRes = await fetch(`${GRAPH_BASE}/me/messenger_profile`, {
@@ -48,16 +51,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Store hash in admin_config
-    const hash = getIceBreakersHash();
-    await supabaseAdmin
+    const hash = getIceBreakersHash(questions);
+    // admin_config has only key / value / created_at (no updated_at column).
+    const { error: hashError } = await supabaseAdmin
       .from("admin_config")
-      .upsert({ key: "ice_breakers_hash", value: `"${hash}"`, updated_at: new Date().toISOString() });
+      .upsert({ key: ICE_BREAKERS_HASH_KEY, value: `"${hash}"` });
+    if (hashError) console.warn("Could not store ice_breakers_hash:", hashError.message);
 
     return NextResponse.json({
       success: true,
       message: "Ice breakers synced successfully",
       synced: syncData,
       current: readData,
+      // What Instagram reports after the sync (null if the read-back failed).
+      live: readRes.ok ? (readData.data?.[0]?.ice_breakers ?? []) : null,
       hash,
     });
   } catch (err: unknown) {

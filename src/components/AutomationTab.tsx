@@ -2,7 +2,8 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Database, MessageSquare, Link as LinkIcon, ArrowRight, CheckCircle2, RefreshCw, Settings } from "lucide-react";
+import { Sparkles, Database, MessageSquare, Link as LinkIcon, ArrowRight, CheckCircle2, Settings } from "lucide-react";
+import IceBreakersCard from "@/components/IceBreakersCard";
 
 // ─── Reusable input component ─────────────────────────────────────────────────
 function ClassyInput({
@@ -57,39 +58,10 @@ export default function AutomationTab() {
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
 
-  // Ice breaker sync state
-  const [iceBreakerLoading, setIceBreakerLoading] = useState(false);
-  const [iceBreakerSuccess, setIceBreakerSuccess] = useState("");
-  const [iceBreakerError, setIceBreakerError] = useState("");
-
   const showMessage = (msg: string, isError = false) => {
     if (isError) setError(msg);
     else setSuccess(msg);
     setTimeout(() => { setSuccess(""); setError(""); }, 5000);
-  };
-
-  const showIceBreakerMessage = (msg: string, isError = false) => {
-    if (isError) setIceBreakerError(msg);
-    else setIceBreakerSuccess(msg);
-    setTimeout(() => { setIceBreakerSuccess(""); setIceBreakerError(""); }, 5000);
-  };
-
-  // ── Sync Ice Breakers (Step 04) ─────────────────────────────────────────────
-  const handleIceBreakerSync = async () => {
-    setIceBreakerLoading(true);
-    try {
-      const res = await fetch("/api/ice-breakers/sync", {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      showIceBreakerMessage(`Ice breakers synced! Hash: ${data.hash}`);
-    } catch (e: unknown) {
-      showIceBreakerMessage(e instanceof Error ? e.message : "Failed to sync ice breakers", true);
-    } finally {
-      setIceBreakerLoading(false);
-    }
   };
 
   // ── Submit context (Step 01 + 02) ─────────────────────────────────────────
@@ -178,7 +150,7 @@ export default function AutomationTab() {
           Automated Agent Training
         </h2>
         <p className="text-[#8A8A8A] font-light text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-          Seamlessly integrate new collections, keywords, and metadata into your AI concierge's active memory bank.
+          Seamlessly integrate new collections, keywords, and metadata into your AI concierge&apos;s active memory bank.
         </p>
       </div>
 
@@ -311,36 +283,7 @@ export default function AutomationTab() {
         </div>
 
         <div className="w-full pl-20 lg:pl-0 lg:w-[60%]">
-          <div className="bg-white p-8 md:p-10 rounded-[2rem] border border-[#EADDCD] shadow-[0_15px_50px_rgba(0,0,0,0.03)] hover:shadow-[0_20px_60px_rgba(212,175,55,0.08)] transition-all duration-500 group-hover:border-[#CFA052]/40">
-            <div className="flex items-center justify-between mb-6">
-              <label className="block text-xs uppercase tracking-[0.2em] text-[#CFA052] font-bold">Starter Questions</label>
-              <span className="text-[10px] uppercase tracking-widest text-[#8A8A8A] bg-[#F8F7F5] border border-[#EADDCD] px-3 py-1 rounded-full">4 Questions</span>
-            </div>
-
-            <div className="space-y-4 mb-6 text-sm text-[#4A4A4A] font-light leading-relaxed">
-              <p className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-[#CFA052]/10 flex items-center justify-center text-[#CFA052] text-xs font-bold">1</span> <strong>Aaj da gold rate? / Today's gold rate</strong> — Shows live 24K/22K/18K rates</p>
-              <p className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-[#CFA052]/10 flex items-center justify-center text-[#CFA052] text-xs font-bold">2</span> <strong>Reel wale design da price</strong> — Asks for reel link</p>
-              <p className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-[#CFA052]/10 flex items-center justify-center text-[#CFA052] text-xs font-bold">3</span> <strong>Shop address te timing</strong> — Shows Patiala location & hours</p>
-              <p className="flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-[#CFA052]/10 flex items-center justify-center text-[#CFA052] text-xs font-bold">4</span> <strong>Team naal gal karni hai / Call me</strong> — Starts lead capture</p>
-            </div>
-
-            <div className="flex justify-center">
-              <button
-                onClick={handleIceBreakerSync}
-                disabled={iceBreakerLoading}
-                className="group relative px-10 py-4 bg-[#CFA052] text-white rounded-full overflow-hidden shadow-lg hover:shadow-xl transition-all duration-500 hover:-translate-y-1 disabled:opacity-50 text-sm uppercase tracking-[0.2em] font-medium flex items-center gap-2"
-              >
-                <RefreshCw className={`w-5 h-5 ${iceBreakerLoading ? "animate-spin" : ""}`} strokeWidth={1.5} />
-                {iceBreakerLoading ? "Syncing..." : "Sync Ice Breakers to Instagram"}
-              </button>
-            </div>
-
-            {(iceBreakerSuccess || iceBreakerError) && (
-              <div className={`mt-4 flex items-center justify-center gap-2 text-sm font-medium ${iceBreakerError ? "text-red-600" : "text-green-600"}`}>
-                {!iceBreakerError && <CheckCircle2 size={18} />} {iceBreakerSuccess || iceBreakerError}
-              </div>
-            )}
-          </div>
+          <IceBreakersCard />
         </div>
       </div>
 
