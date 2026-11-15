@@ -1,12 +1,16 @@
 // src/app/api/auth/login/route.ts
 import { login } from "@/lib/auth-custom";
+import { LOGIN_WINDOW_MINUTES } from "@/lib/login-rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   try {
     const { username, password } = await request.json();
 
-    if (!username || !password) {
+    if (
+      typeof username !== "string" || typeof password !== "string" ||
+      !username.trim() || !password
+    ) {
       return NextResponse.json(
         { success: false, error: "Username and password required" },
         { status: 400 }
@@ -16,9 +20,13 @@ export async function POST(request: NextRequest) {
     const result = await login(username, password, request);
 
     if (!result.success) {
+      const status = result.rateLimited ? 429 : result.serverError ? 500 : 401;
       return NextResponse.json(
         { success: false, error: result.error },
-        { status: 401 }
+        {
+          status,
+          headers: result.rateLimited ? { "Retry-After": String(LOGIN_WINDOW_MINUTES * 60) } : undefined,
+        }
       );
     }
 

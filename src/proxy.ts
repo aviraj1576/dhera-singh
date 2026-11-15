@@ -1,5 +1,5 @@
 // src/proxy.ts
-import { verifySession } from "@/lib/auth-custom";
+import { SESSION_COOKIE_NAME, verifySession } from "@/lib/auth-custom";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function proxy(request: NextRequest) {
@@ -13,7 +13,6 @@ export async function proxy(request: NextRequest) {
     "/privacy",
     "/terms",
     "/data-deletion",
-    "/auth/callback",
     "/_next",
     "/favicon.ico",
     "/robots.txt",
@@ -33,7 +32,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Verify custom session
-  const user = await verifySession();
+  const user = await verifySession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
   if (!user) {
     const loginUrl = new URL("/login", request.url);
@@ -47,6 +46,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/webhook|login|api/auth|privacy|terms|data-deletion|auth/callback).*)",
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|api/webhook|login|api/auth|privacy|terms|data-deletion).*)",
   ],
 };

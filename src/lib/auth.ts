@@ -1,56 +1,32 @@
 // src/lib/auth.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseRouteClient } from "@/lib/supabase-server";
+import { SESSION_COOKIE_NAME, verifySession, type StaffUser } from "@/lib/auth-custom";
 
 export type StaffRole = "admin" | "agent";
-
-export interface StaffUser {
-  id: string;
-  email: string;
-  role: StaffRole;
-  displayName: string;
-}
+export type { StaffUser };
 
 /**
- * Verify staff session from cookies (for dashboard pages and API routes)
- * Returns staff user object on success, or NextResponse with 401/403 on failure
- * Uses getUser() for security - validates with Auth server
+ * Verify the staff session cookie (set by /api/auth/login) for API routes.
+ * Returns the staff user on success, or a NextResponse with 401/403 on failure.
+ *
+ * NOTE: this used to validate Supabase Auth cookies. Login now issues our own
+ * `staff_session` cookie, so it must be verified the same way here.
  */
 export async function requireStaff(
   request: NextRequest,
   allowedRoles?: StaffRole[]
 ): Promise<StaffUser | NextResponse> {
-  // Create Supabase client with request cookies
-  const cookieHeader = request.headers.get("cookie") ?? undefined;
-  const supabase = await createSupabaseRouteClient(cookieHeader);
+  const user = await verifySession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
-  // Use getUser() for security - validates with Auth server
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-  if (userError || !user) {
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: staff, error } = await supabase
-    .from("staff_profiles")
-    .select("role, active, display_name")
-    .eq("user_id", user.id)
-    .single();
-
-  if (error || !staff || !staff.active) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (allowedRoles && !allowedRoles.includes(staff.role)) {
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
-  return {
-    id: user.id,
-    email: user.email!,
-    role: staff.role,
-    displayName: staff.display_name,
-  };
+  return user;
 }
 
 /**

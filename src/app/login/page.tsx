@@ -7,7 +7,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/";
+  // Only allow same-site relative paths. Otherwise /login?redirect=https://evil.com
+  // (or //evil.com) would send a freshly-authenticated user off-site.
+  const rawRedirect = searchParams.get("redirect") || "/";
+  const redirect =
+    rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") && !rawRedirect.startsWith("/\\")
+      ? rawRedirect
+      : "/";
   const errorParam = searchParams.get("error");
 
   const [username, setUsername] = useState("");
@@ -102,6 +108,9 @@ function LoginForm() {
               id="username"
               type="text"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}

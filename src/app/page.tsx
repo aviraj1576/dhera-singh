@@ -2,7 +2,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Sparkles, LogOut } from "lucide-react";
 import DashboardTab  from "@/components/DashboardTab";
 import AutomationTab from "@/components/AutomationTab";
 import UpdatePriceTab from "@/components/UpdatePriceTab";
@@ -15,9 +16,24 @@ type Tab = (typeof TABS)[number];
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("Dashboard");
   const [mounted, setMounted] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const router = useRouter();
 
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      // Revokes the session server-side and clears the cookie.
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      // Go to the login page even if the request failed; the proxy will
+      // bounce us back here if the cookie is somehow still valid.
+      router.push("/login");
+      router.refresh();
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#FCFDFD] text-[#2A2A2A] font-sans relative overflow-hidden selection:bg-[#D4AF37]/20 selection:text-[#967520]">
@@ -60,15 +76,26 @@ export default function App() {
             ))}
           </nav>
 
-          {/* Live indicator */}
-          <div className="hidden md:flex items-center gap-3 px-5 py-2 rounded-full border border-[#D4AF37]/30 bg-white shadow-sm shrink-0">
-            <div className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#CFA052] opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#CFA052]" />
+          {/* Live indicator + sign out */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="hidden md:flex items-center gap-3 px-5 py-2 rounded-full border border-[#D4AF37]/30 bg-white shadow-sm">
+              <div className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#CFA052] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#CFA052]" />
+              </div>
+              <span className="text-xs uppercase tracking-[0.15em] text-[#8A8A8A] font-medium">
+                Agent Active
+              </span>
             </div>
-            <span className="text-xs uppercase tracking-[0.15em] text-[#8A8A8A] font-medium">
-              Agent Active
-            </span>
+
+            <button
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="flex items-center gap-2 px-4 py-2 rounded-full border border-[#EADDCD] bg-white text-xs uppercase tracking-[0.15em] text-[#8A8A8A] font-medium shadow-sm transition-colors hover:text-[#2A2A2A] hover:border-[#D4AF37]/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <LogOut className="w-3.5 h-3.5" strokeWidth={1.5} />
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
           </div>
 
         </div>
